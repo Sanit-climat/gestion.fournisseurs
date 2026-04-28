@@ -6,10 +6,22 @@ Application web standalone de **scan de factures fournisseurs**, **vérification
 
 ### Scan & vérification des prix
 - 📄 **Scan multi-format** : PDF (texte ou scanné), PNG, JPG, WEBP — extraction auto via PDF.js + Tesseract.js OCR
-- 🏷️ **Auto-détection fournisseur** : Cedeo, Brossette, Rexel, Würth, Point P, Saint-Gobain, Sonepar, Yesss Électrique, Castorama, Leroy Merlin, Prolians, Tereva, Frans Bonhomme, Richardson (extensible)
+- 🏷️ **Auto-détection de 20+ fournisseurs** : Aredis, Cedeo, Brossette, Rexel, Würth, Point P, Saint-Gobain, Sonepar, Yesss Électrique, Castorama, Leroy Merlin, Prolians, Tereva, Frans Bonhomme, Richardson, PUM, Bruneau, BigChange, ASTBTP 13 (extensible)
 - 📊 **Base articles fournisseurs** : code, désignation, fournisseur, catégorie, unité, prix de référence, tolérance personnalisée
 - ✅ **Détection d'écarts en temps réel** : 3 niveaux (vert ≤ tolérance, orange 2-5%, rouge > 5%)
 - 💰 **Calcul du surcoût** : (PU facturé − PU référence) × quantité
+
+### Parser intelligent (testé sur 10 factures réelles : 91% de réussite)
+Le parseur reconnaît automatiquement :
+- 📅 **Dates multi-formats** : `23/04/2026`, `02 - 03 - 2026`, `30.03.2026`, `07 Avril 2026`, `22 avril 2026` (FR + EN)
+- ⏰ **Échéances relatives** : `30 jours fin de mois`, `Payment terms: 30 days`, `Reste à payer ... au DD/MM/YYYY`
+- 🔢 **Numéro de facture** : libellé inline OU sur ligne séparée OU au-dessus de la date (PUM)
+- 💶 **TVA non applicable** détection automatique (art. 293B, TVA non applicable, etc.)
+- 📋 **Tableaux à colonnes éclatées** : préprocesseur qui regroupe automatiquement (Asplomberie 12 lignes ✓)
+- 📊 **Blocs labels↔valeurs en cascade** : Aredis, ASTBTP, BigChange (labels + valeurs en colonnes)
+- 🔄 **Auto-correction des inversions** HT/TVA quand le PDF rend mal les colonnes (ASTBTP)
+- 🚫 **Filtres anti-bruit** : adresses, codes postaux, SIRET, IBAN, "Décret 2009-138", footers CGV
+- 💼 **Format anglais** supporté : "Total ex VAT" / "Total Tax" / "Total" / "Payment terms: 30 days"
 
 ### Suivi facturier
 - 🏷️ **5 statuts** : `À vérifier` (auto si écarts détectés), `Validée`, `Payée partiellement`, `Soldée`, `Litige`

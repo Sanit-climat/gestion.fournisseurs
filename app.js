@@ -273,219 +273,1130 @@ function showOcrProgress(show, label, pct) {
 // ============================================================
 
 const SUPPLIER_PATTERNS = [
-  { re: /cedeo|c[eé]d[ée]o/i, name: 'Cedeo' },
-  { re: /brossette/i, name: 'Brossette' },
-  { re: /rexel/i, name: 'Rexel' },
-  { re: /w[uü]rth/i, name: 'Würth' },
-  { re: /point\s*p|point[\s.-]*p\b/i, name: 'Point P' },
+  // --- Grossistes / négoces matériaux ---
+  { re: /\baredis\b/i, name: 'Aredis Robinetterie' },
+  { re: /\bcedeo\b/i, name: 'Cedeo' },
+  { re: /\bbrossette\b/i, name: 'Brossette' },
+  { re: /\brexel\b/i, name: 'Rexel' },
+  { re: /\bw[uü]rth\b/i, name: 'Würth' },
+  { re: /point\s*p\b/i, name: 'Point P' },
   { re: /saint[\s-]*gobain/i, name: 'Saint-Gobain' },
-  { re: /sonepar/i, name: 'Sonepar' },
-  { re: /yesss\s*electrique/i, name: 'Yesss Électrique' },
-  { re: /castorama/i, name: 'Castorama' },
+  { re: /\bsonepar\b/i, name: 'Sonepar' },
+  { re: /yesss\s*[ée]lectrique/i, name: 'Yesss Électrique' },
+  { re: /\bcastorama\b/i, name: 'Castorama' },
   { re: /leroy\s*merlin/i, name: 'Leroy Merlin' },
-  { re: /prolians/i, name: 'Prolians' },
-  { re: /tereva/i, name: 'Tereva' },
+  { re: /\bprolians\b/i, name: 'Prolians' },
+  { re: /\btereva\b/i, name: 'Tereva' },
   { re: /frans\s*bonhomme/i, name: 'Frans Bonhomme' },
-  { re: /richardson/i, name: 'Richardson' },
+  { re: /\brichardson\b/i, name: 'Richardson' },
+  { re: /\bpum\b/i, name: 'PUM' },
+  { re: /\bbruneau\b/i, name: 'Bruneau' },
+  // --- Logiciels / services ---
+  { re: /bigchange|big\s*change/i, name: 'BigChange' },
+  { re: /astbtp|ast\s*btp|services?\s*sant[ée]\s*au\s*travail/i, name: 'ASTBTP 13' },
 ];
 
-function parseInvoice(text) {
+// Détection nom fournisseur quand pas dans la liste : prendre la 1ère ligne en MAJUSCULES significative,
+// ou un pattern style "Nom Prénom" en début, ou ce qui suit "Émetteur"
+function autoDetectSupplier(text) {
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const blacklist = /^(reference|référence|article|description|d[ée]signation|qte|qt[ée]|quantit[ée]|prix|unitaire|montant|total|tva|ht|ttc|net|page|adresse|t[ée]l|fax|email|siret|num[ée]ro|code|client|date|conditions?|paiement|virement|facture|invoice|chantier|commande|n[°o]|montant|hors\s*taxe|soumis|taux|garantie|p[ée]riode|exigible|adh[ée]rent|sasu|sas|sarl|sa|ei|eurl|sci|cba?|ttc|hors\s+taxes?|france|amount|vat|company|reg|tel)$/i;
+  // Si la ligne contient PLUSIEURS mots-clés tableau → c'est un en-tête, pas un nom de société
+  const isTableHeaderLine = (s) => {
+    const lc = s.toLowerCase();
+    let hits = 0;
+    for (const kw of ['reference', 'référence', 'article', 'description', 'designation', 'désignation', 'quantité', 'quantite', 'qte', 'qté', 'prix', 'montant', 'total', 'unité', 'unite', 'unit', 'tva', 'ttc', 'pu ', 'p.u', 'garantie', 'taxe']) {
+      if (lc.includes(kw)) hits++;
+      if (hits >= 2) return true;
+    }
+    return false;
+  };
+
+  // 1. Cherche après le mot "Émetteur" / "Emetteur" / "De" / "From"
+  for (let i = 0; i < lines.length; i++) {
+    if (/^(émetteur|emetteur|expéditeur|from|de\s*:)/i.test(lines[i])) {
+      for (let j = i + 1; j < Math.min(i + 5, lines.length); j++) {
+        const cand = lines[j];
+        if (/^(soci[ée]t[ée]|adresse|pays|num[ée]ro|code|tva|n[°o]|votre\s+contact)\s*:?\s*$/i.test(cand)) continue;
+        if (cand.length > 2 && cand.length < 50 && !/^\d/.test(cand) && !/^:/.test(cand) && !blacklist.test(cand) && !isTableHeaderLine(cand)) {
+          return cand.trim();
+        }
+      }
+    }
+  }
+
+  // 2. Cherche un nom de société avec forme légale
+  for (const l of lines.slice(0, 30)) {
+    const m = l.match(/^([A-ZÀ-Ÿ][\wÀ-ÿ' \-&\.]{2,40})\s+(SAS|SASU|SARL|SA|EI|EURL|SCI|SCEA|GAEC|SCOP|LIMITED|LTD|GMBH)\b/);
+    if (m && !blacklist.test(m[1]) && !isTableHeaderLine(m[1])) return (m[1] + ' ' + m[2]).trim();
+  }
+
+  // 3. Première ligne courte non-vide, en grosse partie majuscules (mais pas un mot-clé de tableau)
+  for (const l of lines.slice(0, 10)) {
+    if (l.length < 3 || l.length > 40) continue;
+    if (/facture|invoice|n[°o]\s*facture/i.test(l)) continue;
+    if (/^[\d\W]/.test(l)) continue;
+    if (blacklist.test(l)) continue;
+    if (isTableHeaderLine(l)) continue;
+    const upper = (l.match(/[A-ZÀ-Ÿ]/g) || []).length;
+    const lower = (l.match(/[a-zà-ÿ]/g) || []).length;
+    if (upper > lower && upper > 2) return l.trim();
+  }
+
+  return '';
+}
+
+// --- Parsing date avec mois en lettres ---
+const FR_MONTHS = {
+  'janvier': 1, 'janv': 1, 'jan': 1,
+  'fevrier': 2, 'février': 2, 'fevr': 2, 'fev': 2, 'févr': 2, 'fév': 2,
+  'mars': 3, 'mar': 3,
+  'avril': 4, 'avr': 4,
+  'mai': 5,
+  'juin': 6,
+  'juillet': 7, 'juil': 7,
+  'aout': 8, 'août': 8,
+  'septembre': 9, 'sept': 9, 'sep': 9,
+  'octobre': 10, 'oct': 10,
+  'novembre': 11, 'nov': 11,
+  'decembre': 12, 'décembre': 12, 'dec': 12, 'déc': 12,
+};
+const EN_MONTHS = {
+  'january': 1, 'jan': 1, 'february': 2, 'feb': 2, 'march': 3, 'mar': 3,
+  'april': 4, 'apr': 4, 'may': 5, 'june': 6, 'jun': 6, 'july': 7, 'jul': 7,
+  'august': 8, 'aug': 8, 'september': 9, 'sep': 9, 'sept': 9,
+  'october': 10, 'oct': 10, 'november': 11, 'nov': 11, 'december': 12, 'dec': 12,
+};
+
+function tryParseDate(s) {
+  if (!s) return '';
+  s = s.trim();
+
+  // Format avec mois en lettres : "07 Avril 2026", "22 avril 2026", "06 avril 2026"
+  let m = s.match(/(\d{1,2})\s+([a-zA-Zéûôâèà]+)\.?\s+(\d{2,4})/);
+  if (m) {
+    const day = parseInt(m[1]);
+    const monthName = m[2].toLowerCase().replace(/[éèê]/g, 'e').replace(/[àâ]/g, 'a').replace(/[ûù]/g, 'u');
+    const month = FR_MONTHS[monthName] || EN_MONTHS[monthName];
+    let year = parseInt(m[3]);
+    if (year < 100) year += year > 50 ? 1900 : 2000;
+    if (month && day >= 1 && day <= 31 && year >= 1990 && year <= 2099) {
+      return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+    }
+  }
+
+  // Format numérique : tolère / - . et espaces (ex : "02 - 03 - 2026", "30.03.2026")
+  m = s.match(/(\d{1,2})\s*[\/\-\.]\s*(\d{1,2})\s*[\/\-\.]\s*(\d{2,4})/);
+  if (m) {
+    let d = parseInt(m[1]), mo = parseInt(m[2]), y = parseInt(m[3]);
+    if (y < 100) y += y > 50 ? 1900 : 2000;
+    // Détecter si format inverse (YYYY-MM-DD)
+    if (d > 31) { [d, y] = [y, d]; }
+    if (d >= 1 && d <= 31 && mo >= 1 && mo <= 12 && y >= 1990 && y <= 2099) {
+      return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+  }
+
+  // ISO : 2026-04-15
+  m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return `${m[1]}-${String(m[2]).padStart(2,'0')}-${String(m[3]).padStart(2,'0')}`;
+
+  return '';
+}
+
+// Cherche des dates dans un texte selon différents libellés
+// Le label peut être suivi de la date sur la même ligne OU sur les lignes suivantes
+function findDateAfter(text, labels) {
+  const lines = text.split(/\r?\n/);
+  for (const label of labels) {
+    const labelRe = new RegExp('(?:^|\\b)' + label + '\\b', 'i');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!labelRe.test(line)) continue;
+      if (LINE_NOISE_RE.test(line)) continue; // ignorer "Décret 2009-138..." etc.
+      // 1. Sur la même ligne après le label
+      const afterLabel = line.replace(labelRe, '|||LABEL|||').split('|||LABEL|||')[1] || '';
+      if (afterLabel) {
+        const d = tryExtractDate(afterLabel);
+        if (d) return d;
+      }
+      // 2. Sur les 3 lignes suivantes (cas où la valeur est en dessous)
+      for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+        if (LINE_NOISE_RE.test(lines[j])) continue;
+        const d = tryExtractDate(lines[j]);
+        if (d) return d;
+      }
+    }
+  }
+  return '';
+}
+
+function tryExtractDate(s) {
+  // Trouver une date dans une chaîne (premier match)
+  let m = s.match(/(\d{1,2}\s*[\/\-\.]\s*\d{1,2}\s*[\/\-\.]\s*\d{2,4})/);
+  if (m) return tryParseDate(m[1]);
+  m = s.match(/(\d{1,2}\s+(?:janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|sept|octobre|octobre|novembre|décembre|decembre|january|february|march|april|may|june|july|august|september|october|november|december|janv|févr|fevr|fév|fev|jan|feb|mar|apr|jun|jul|aug|oct|nov|dec)\.?\s+\d{2,4})/i);
+  if (m) return tryParseDate(m[1]);
+  m = s.match(/(\d{4}-\d{1,2}-\d{1,2})/);
+  if (m) return tryParseDate(m[1]);
+  return '';
+}
+
+// Calcule une échéance "30 jours" depuis une date
+function applyRelativeDue(invoiceDate, text) {
+  if (!invoiceDate) return '';
+  const lc = text.toLowerCase();
+  let days = null;
+  let endOfMonth = false;
+  let m = lc.match(/(\d{1,3})\s*jours?\s*(?:fin\s*de\s*mois|fdm)/i);
+  if (m) { days = parseInt(m[1]); endOfMonth = true; }
+  else {
+    m = lc.match(/(?:payment\s*terms|conditions?\s*de\s*r[èe]glement|d[ée]lai|net)\s*[:.]?\s*(\d{1,3})\s*(?:jours|days|j\b)/i);
+    if (m) days = parseInt(m[1]);
+    else {
+      m = lc.match(/\b(\d{1,3})\s*jours?\s*(?:net|nets)?\s*(?:date\s*de\s*facture)?/i);
+      if (m) days = parseInt(m[1]);
+    }
+  }
+  if (days == null) return '';
+  const d = new Date(invoiceDate);
+  d.setDate(d.getDate() + days);
+  if (endOfMonth) d.setMonth(d.getMonth() + 1, 0);
+  return d.toISOString().slice(0, 10);
+}
+
+// Tronque le texte aux zones CGV / mentions légales / footer pour éviter les faux positifs.
+// Important : on ne coupe PAS sur les mentions courtes type "(Décret ...)" ni "selon les articles
+// du code général" car celles-ci apparaissent souvent en plein milieu du contenu utile.
+// On ne coupe que sur les marqueurs de blocs CGV évidents qui terminent le doc.
+function trimFooter(text) {
+  const cuts = [
+    // Le titre doit être majeur (en début de ligne ou seul) pour éviter de couper sur
+    // "Retrouver nos conditions générales de ventes sur notre site internet..."
+    /(?:^|\n)\s*CONDITIONS\s+G[ÉE]N[ÉE]RALES?\s+DE\s+VENTE\s*$/im,
+    /(?:^|\n)\s*\bMENTIONS?\s+L[ÉE]GALES\b\s*$/im,
+    /^Cl?ause\s+attributive/im,
+    /R[ée]serves?\s+de\s+propri[ée]t[ée]\s*:/i,
+    /Catalogue,?\s+documentations?\s+et\s+propri[ée]t[ée]/i,
+  ];
+  let cutIdx = text.length;
+  for (const re of cuts) {
+    const m = text.match(re);
+    if (m && m.index < cutIdx) cutIdx = m.index;
+  }
+  return text.slice(0, cutIdx);
+}
+
+// Filtre une LIGNE individuelle pour exclure les mentions parasites (footer, copyright, décret)
+// Utilisé par findDateAfter, findAmountAfter et parseInvoiceLines pour ignorer ces lignes.
+const LINE_NOISE_RE = /(d[ée]cret\s+\d{4}|application\s+du\s+d[ée]cret|article\s+L\s*\d+|p[ée]nalit[ée]s?\s+de\s+retard|conditions?\s+g[ée]n[ée]rales|escompte\s+pour\s+r[èe]glement|en\s+cas\s+de\s+retard|sans\s+escompte|art\.?\s*L\s*\d+|RCS\s+\w+\s+\d+|capital\s+(?:social|de)|art\.?\s*293\s*B|recouvrement|indemnit[ée]\s+forfaitaire)/i;
+
+// Cherche un montant après un libellé : sur la même ligne (avant ou après) OU sur les lignes suivantes
+function findAmountAfter(text, labels) {
+  const lines = text.split(/\r?\n/);
+  // Liste de labels "concurrents" : si on cherche TTC et qu'on tombe sur "Total HT", on s'arrête
+  const otherTotalLabels = /(?:somme\s*[àa]\s*payer\s*ttc|total\s*ttc|montant\s*ttc|total\s*ht|total\s*tva|total\s*tax|montant\s*ht|sous[\s-]*total\s*ht|net\s*[àa]\s*payer|solde\s*d[uû])/i;
+
+  for (const label of labels) {
+    const labelRe = new RegExp('(?:^|\\b)' + label + '(?:\\b|\\s|$|:)', 'i');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      if (!labelRe.test(line)) continue;
+      if (LINE_NOISE_RE.test(line)) continue;
+      // Skip: ligne d'en-tête horizontal de totaux (contient PLUSIEURS labels totaux)
+      const lineLc = line.toLowerCase();
+      let kwHits = 0;
+      if (/total\s*ht/.test(lineLc)) kwHits++;
+      if (/total\s*ttc/.test(lineLc)) kwHits++;
+      if (/montant\s*tva|tx\s*\/\s*montant/.test(lineLc)) kwHits++;
+      if (/net\s*[àa]?\s*payer/.test(lineLc)) kwHits++;
+      if (kwHits >= 3) continue; // c'est un en-tête de colonnes, pas un label suivi de valeur
+
+      // 1. Sur la même ligne, après le label
+      const parts = line.split(labelRe);
+      if (parts.length > 1) {
+        const after = parts.slice(1).join(' ');
+        const v1 = extractAmountFromLine(after);
+        if (v1 != null && v1 > 0) return v1;
+      }
+      // 2. Sur la même ligne, AVANT le label (cas "894,00 Somme à payer TTC" en ASTBTP)
+      if (parts.length > 0 && parts[0]) {
+        const before = parts[0];
+        const v0 = extractAmountFromLine(before);
+        if (v0 != null && v0 > 0) return v0;
+      }
+      // 3. Sur les 5 lignes suivantes (cas labels en bloc puis valeurs en bloc)
+      // MAIS on s'arrête si on tombe sur un AUTRE label de total différent de celui qu'on cherche
+      for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
+        const nextLine = lines[j];
+        if (LINE_NOISE_RE.test(nextLine)) continue;
+        // Si la ligne contient un autre label de total qui n'est PAS celui qu'on cherche, on arrête
+        if (otherTotalLabels.test(nextLine) && !labelRe.test(nextLine)) {
+          break;
+        }
+        const v = extractAmountFromLine(nextLine);
+        if (v != null && v > 0) return v;
+      }
+    }
+  }
+  return null;
+}
+
+// Cas particulier PUM/Richardson : en-tête de totaux sur UNE ligne + valeurs sur LA ligne suivante
+// Ex: "TOTAL HT EUR NET HT EUR TX / MONTANT TVA TOTAL TTC NET A PAYER EUR"
+//     " 21,00  20,00  4,20  25,20 21,00  0,00"
+function parseHorizontalTotals(text) {
+  const lines = text.split(/\r?\n/);
+  const result = { total: null, vat: null, totalTtc: null };
+
+  for (let i = 0; i < lines.length - 1; i++) {
+    const line = lines[i];
+    const lc = line.toLowerCase();
+    // L'en-tête doit contenir AU MOINS 3 mots-clés totaux
+    let hits = 0;
+    if (/total\s*ht/.test(lc)) hits++;
+    if (/total\s*ttc/.test(lc)) hits++;
+    if (/montant\s*tva|tva/.test(lc)) hits++;
+    if (/net\s*[àa]?\s*payer|net\s*a\s*payer/.test(lc)) hits++;
+    if (hits < 2) continue;
+    // Si la ligne contient des chiffres (pas que des labels), on saute
+    const numsInHeader = (line.match(/\d+[\.,]?\d*/g) || []).length;
+    if (numsInHeader > 1) continue;
+
+    // Trouver les positions des labels-colonnes dans l'en-tête
+    const colDefs = [];
+    const findCol = (re, type) => {
+      const m = line.match(re);
+      if (m) colDefs.push({ pos: m.index, len: m[0].length, type });
+    };
+    findCol(/total\s*ht\s*(?:eur|net)?/i, 'ht');
+    findCol(/montant\s*tva|^tx\s*\/\s*montant\s*tva|tx\s*\/\s*montant\s*tva/i, 'vat');
+    findCol(/total\s*ttc/i, 'ttc');
+
+    if (colDefs.length < 2) continue;
+
+    // Trier par position
+    colDefs.sort((a, b) => a.pos - b.pos);
+
+    // Sur la ligne valeurs, extraire tous les nombres avec leurs positions
+    let valuesLine = lines[i + 1];
+    if (!valuesLine || !valuesLine.trim()) {
+      // sauter ligne vide
+      if (i + 2 < lines.length) valuesLine = lines[i + 2];
+      else continue;
+    }
+
+    const numRe = /(-?\d+(?:[\s\.,]\d{3})*(?:[\.,]\d{1,4})?)/g;
+    const nums = [];
+    let nm;
+    while ((nm = numRe.exec(valuesLine)) !== null) {
+      const v = parseFrNumber(nm[1]);
+      if (!isNaN(v)) nums.push({ val: v, pos: nm.index });
+    }
+    if (nums.length < 2) continue;
+
+    // Apparier chaque colonne avec le nombre dont la position est la plus proche
+    for (const col of colDefs) {
+      let best = null, bestDist = Infinity;
+      for (const n of nums) {
+        const d = Math.abs(n.pos - col.pos);
+        if (d < bestDist) { bestDist = d; best = n; }
+      }
+      if (best) {
+        if (col.type === 'ht' && result.total == null) result.total = Math.abs(best.val);
+        if (col.type === 'vat' && result.vat == null) result.vat = Math.abs(best.val);
+        if (col.type === 'ttc' && result.totalTtc == null) result.totalTtc = Math.abs(best.val);
+      }
+    }
+    if (result.total != null || result.totalTtc != null) return result;
+  }
+  return result;
+}
+
+// Cas particulier : on a une cascade "Total HT / Total TVA / Total TTC / ..." en colonne
+// suivie d'une cascade de valeurs. On apparie label[i] avec value[j] dans l'ordre.
+function parseStackedTotals(text) {
+  const lines = text.split(/\r?\n/).map(l => l.trim());
+  const result = { total: null, vat: null, totalTtc: null };
+
+  // Cherche un bloc de labels totaux consécutifs
+  const labelRe = /^(total\s*ht\s*net|total\s*net\s*ht|total\s*ht|port\s*ht|total\s*eco(?:[\.\s].*)?|total\s*tva|total\s*ttc|total\s*ex\s*vat|total\s*tax|sub[\s-]?total|acomptes?|net\s*[àa]\s*payer|solde\s*d[uû]|^total\s*$|amount\s*due)\s*$/i;
+  for (let i = 0; i < lines.length - 4; i++) {
+    if (!labelRe.test(lines[i])) continue;
+    let labels = [];
+    let k = i;
+    while (k < lines.length && labelRe.test(lines[k])) {
+      labels.push(lines[k]);
+      k++;
+    }
+    if (labels.length < 3) { i = k - 1; continue; }
+    let j = k;
+    while (j < lines.length && lines[j].trim() === '') j++;
+    const values = [];
+    while (j < lines.length && values.length < labels.length) {
+      const t = lines[j].trim();
+      if (!t) { j++; continue; }
+      const m = t.match(/^(-?[\d\s\.,]+)\s*€?\s*$/);
+      if (!m) break;
+      const v = parseFrNumber(m[1]);
+      if (isNaN(v)) break;
+      values.push(v);
+      j++;
+    }
+    if (values.length === labels.length) {
+      let htNetIdx = -1, htIdx = -1;
+      for (let p = 0; p < labels.length; p++) {
+        const lab = labels[p].toLowerCase();
+        if (/total\s*(ht\s*net|net\s*ht)/.test(lab)) htNetIdx = p;
+        else if (/total\s*ht/.test(lab) && !/eco|port|net/.test(lab)) htIdx = p;
+        else if (/total\s*ex\s*vat/.test(lab)) htIdx = p;  // Anglais : Total ex VAT
+        if (/total\s*tva/.test(lab) || /total\s*tax/.test(lab)) result.vat = Math.abs(values[p]);
+        if (/total\s*ttc/.test(lab) || /^total\s*$/.test(lab) || /amount\s*due/.test(lab)) {
+          // "Total" seul = TTC dans ce contexte
+          if (result.totalTtc == null) result.totalTtc = Math.abs(values[p]);
+        }
+      }
+      if (htNetIdx >= 0) result.total = Math.abs(values[htNetIdx]);
+      else if (htIdx >= 0) result.total = Math.abs(values[htIdx]);
+      return result;
+    }
+  }
+  return result;
+}
+
+// Extrait le PREMIER nombre cohérent (positif, raisonnable) d'une ligne
+function extractAmountFromLine(s) {
+  if (!s) return null;
+  // Skip lignes qui sont juste des dates ou des codes
+  if (/^\s*\d{1,2}\s*[\/\-]\s*\d{1,2}/.test(s.trim())) return null;
+  // Skip lignes d'adresse "280 AVENUE...", "13015 MARSEILLE", etc.
+  if (/\d+\s+(avenue|rue|bd|boulevard|impasse|all[ée]e|chemin|place|cours|quai|route|av\.?|chem\.?|rte\.?)\b/i.test(s)) return null;
+  // Skip codes postaux suivis d'un nom de ville (5 chiffres + lettres)
+  if (/^\s*\d{5}\s+[A-ZÀ-Ÿ]/i.test(s.trim())) return null;
+  // Skip SIRET (14 chiffres) et SIREN (9 chiffres) avec label
+  if (/(?:siret|siren|tva\s*intra|n[°o]?\s*tva|num[ée]ro\s*d[''’]?entreprise|rcs|n[°o]?\s*adh[ée]rent)\s*[:.]/i.test(s)) return null;
+  // Skip lignes avec libellé "Facture N°" ou "Invoice no"
+  if (/(?:^|\b)(facture|invoice)\s*(?:n[°o]|no\.?|number|#)/i.test(s)) return null;
+  // Skip numéros de téléphone (format français)
+  if (/\b0[1-9](?:[\s\-\.]?\d{2}){4}\b/.test(s)) return null;
+  // Skip IBAN/BIC
+  if (/\b(iban|bic|swift)\b/i.test(s)) return null;
+  // Skip ligne "Période : ..."
+  if (/^\s*p[ée]riode\s*:/i.test(s)) return null;
+  // Skip jours de la semaine suivis d'une date (Asplomberie : "Lundi 23/03")
+  if (/\b(lundi|mardi|mercredi|jeudi|vendredi|samedi|dimanche|lun|mar|mer|jeu|ven|sam|dim|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(s)) return null;
+
+  const re = /(-?\d+(?:[\s\.,]\d{3})*(?:[\.,]\d{1,4})?)\s*€?/;
+  const m = s.match(re);
+  if (m) {
+    const v = parseFrNumber(m[1]);
+    // Filtre les pourcentages purs (5, 10, 20) si suivis de %
+    const idx = m.index + m[0].length;
+    const after = s.slice(idx, idx + 3);
+    if (/^\s*%/.test(after)) return null;
+    // Rejet : si après le nombre on a / ou - puis un autre nombre, c'est une date (ex "23/03")
+    if (/^\s*[\/\-]\s*\d/.test(after)) return null;
+    if (!isNaN(v) && v >= 0) return v;
+  }
+  return null;
+}
+
+// Cherche le numéro de facture en testant plusieurs patterns + valeur sur ligne suivante
+function findInvoiceNumber(text) {
+  const lines = text.split(/\r?\n/);
+  // Patterns "label: valeur" sur la même ligne
+  const inlinePatterns = [
+    /facture\s*n[°o]\s*[:#]?\s*([A-Z0-9][A-Z0-9_\-\/\.]{1,25})/i,
+    /facture\s*[#]\s*([A-Z0-9][A-Z0-9_\-\/\.]{1,25})/i,
+    /n[°o]\s*facture\s*[:#]?\s*([A-Z0-9][A-Z0-9_\-\/\.]{1,25})/i,
+    /n[°o]\s*doc(?:ument)?\s*[:#]?\s*([A-Z0-9][A-Z0-9_\-\/\.]{1,25})/i,
+    /facture\s*n\s*[:#]?\s*([A-Z0-9][A-Z0-9_\-\/\.]{1,25})/i,
+    /facture\s+([A-Z]{1,3}\d{4,12})\b/i,            // "Facture F2600008"
+    /facture\s+#?(\d{4}-\d{2}-\d{2})\b/i,            // "Facture #2026-04-11"
+    /reference\s*[:#]?\s*([A-Z]{2,5}\d{4,12})/i,
+    /facture\s*n[°o]?\.?\s*[:#]?\s*(\d{2,15})/i,    // "Facture n:040426" ou "Facture N° 38476"
+    /\bnum[ée]ro\s+([A-Z0-9][A-Z0-9_\-\/\.]{2,25})/i,
+  ];
+  // Mots qu'on ne veut surtout pas comme numéro
+  const blacklist = /^(de|du|le|la|les|sur|page|pour|par|au|chantier|adh[ée]rent|reference|tva|adh|n|client|adresse|date|num|pr[ée]l[èe]vement|virement)$/i;
+
+  for (const re of inlinePatterns) {
+    const m = text.match(re);
+    if (m && m[1]) {
+      const cand = m[1].trim().replace(/[,;.]+$/, '');
+      if (cand.length >= 2 && !blacklist.test(cand)) return cand;
+    }
+  }
+
+  // Patterns "label en bloc, valeur sur ligne suivante"
+  // ex: "N° FACTURE\n58", "Reference\nINV484871", "NUMÉRO\n52264100", "Numéro\nM/FA2605436"
+  const labelOnLineRe = /^(n[°o]\s*facture|num[ée]ro|reference|facture\s*n[°o]?)\s*$/i;
+  for (let i = 0; i < lines.length; i++) {
+    if (labelOnLineRe.test(lines[i].trim())) {
+      // Chercher la valeur dans les 1-3 lignes suivantes
+      for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+        const cand = lines[j].trim().split(/\s+/)[0];
+        if (cand && cand.length >= 2 && /^[A-Z0-9][A-Z0-9_\-\/\.]+$/i.test(cand) && !blacklist.test(cand)) {
+          return cand;
+        }
+      }
+    }
+  }
+
+  return '';
+}
+
+// Détecte si la facture est en TVA non applicable
+function isVatExempt(text) {
+  return /tva\s*non\s*applicable|art(?:icle)?\.?\s*293\s*B|exempt(?:é|ee)\s*de\s*tva/i.test(text);
+}
+
+function parseInvoice(rawText) {
+  // Travailler sur une version tronquée pour les méta (sans CGV/footer)
+  const text = trimFooter(rawText);
+
   const result = {
     supplier: '', number: '', date: '', dueDate: '',
     total: null, vat: null, totalTtc: null,
     paymentMode: 'virement', lines: [],
   };
 
-  // 1. Fournisseur
+  // ============== 1. Fournisseur ==============
   for (const p of SUPPLIER_PATTERNS) {
     if (p.re.test(text)) { result.supplier = p.name; break; }
   }
   if (!result.supplier) {
+    // fournisseurs déjà connus
     for (const sid in STATE.suppliers) {
       const s = STATE.suppliers[sid];
-      const re = new RegExp(s.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+      if (!s.name) continue;
+      const re = new RegExp('\\b' + s.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i');
       if (re.test(text)) { result.supplier = s.name; break; }
     }
   }
+  if (!result.supplier) result.supplier = autoDetectSupplier(text);
 
-  // 2. N° de facture
-  const numMatches = [
-    /facture\s*(?:n[°o]|num(?:[ée]ro)?)?\s*[:#]?\s*([A-Z0-9][A-Z0-9_\-\/]{3,20})/i,
-    /n[°o]\s*facture\s*[:#]?\s*([A-Z0-9][A-Z0-9_\-\/]{3,20})/i,
-    /invoice\s*(?:no|number|#)?\s*[:#]?\s*([A-Z0-9][A-Z0-9_\-\/]{3,20})/i,
-    /\bFA[\s_\-]*[\dA-Z][\dA-Z_\-\/]{4,15}/i,
-  ];
-  for (const re of numMatches) {
-    const m = text.match(re);
-    if (m) { result.number = (m[1] || m[0]).trim().replace(/\s+/g, ''); break; }
+  // ============== 2. N° de facture ==============
+  result.number = findInvoiceNumber(text);
+
+  // ============== 3. Date de facture ==============
+  // Patterns prioritaires : labels EXPLICITES de date facture
+  result.date = findDateAfter(text, [
+    'date\\s*(?:de\\s*)?(?:la\\s*)?facture',
+    'date\\s*(?:de\\s*)?facturation',
+    "date\\s*d[\'’]?émission",
+    "date\\s*d[\'’]?emission",
+    'invoice\\s*date',
+  ]);  // "Facture N° XXX du <date>" ou "Facture du <date>"
+  if (!result.date) {
+    let m = text.match(/facture\s*n[°o]?\.?\s*[:#]?\s*[A-Z0-9_\-\.\/]{1,25}\s*du\s+([\dA-Za-zéûôâèà\s\/\-\.]{6,30})/i);
+    if (m) result.date = tryExtractDate(m[1]);
+  }
+  if (!result.date) {
+    let m = text.match(/facture\s+du\s+([\dA-Za-zéûôâèà\s\/\-\.]{6,30})/i);
+    if (m) result.date = tryExtractDate(m[1]);
+  }
+  // "DU 22 avril 2026" sur une ligne propre
+  if (!result.date) {
+    const lines = text.split(/\r?\n/);
+    for (const l of lines) {
+      const m = l.match(/^\s*du\s+(\d{1,2}\s+(?:janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre)\.?\s+\d{2,4})/i);
+      if (m) { result.date = tryExtractDate(m[1]); if (result.date) break; }
+    }
+  }
+  // "Le DD/MM/YYYY" en début de ligne
+  if (!result.date) {
+    const lines = text.split(/\r?\n/);
+    for (const l of lines.slice(0, 30)) {
+      const m = l.match(/^\s*Le\s+(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})\b/i);
+      if (m) { result.date = tryExtractDate(m[1]); break; }
+    }
+  }
+  // "DATE" seul comme libellé de colonne, valeur sur ligne suivante
+  if (!result.date) {
+    result.date = findDateAfter(text, ['^date\\s*$']);
+  }
+  // Dernier recours : la PREMIÈRE date numérique trouvée dans les 30 premières lignes
+  // MAIS en EXCLUANT les contextes "estim", "livraison", "intervention", "échéance", "exigible"
+  if (!result.date) {
+    const lines = text.split(/\r?\n/).slice(0, 40);
+    for (const l of lines) {
+      if (/estim|livraison|intervention|[ée]ch[ée]ance|exigible|payer|payment\s*terms/i.test(l)) continue;
+      if (LINE_NOISE_RE.test(l)) continue;
+      const m = l.match(/\b(\d{1,2}\s*[\/\-\.]\s*\d{1,2}\s*[\/\-\.]\s*\d{2,4})\b/);
+      if (m) { result.date = tryParseDate(m[1]); if (result.date) break; }
+    }
+  }
+  if (!result.date) {
+    const lines = text.split(/\r?\n/).slice(0, 40);
+    for (const l of lines) {
+      if (/estim|livraison|intervention|[ée]ch[ée]ance|exigible/i.test(l)) continue;
+      if (LINE_NOISE_RE.test(l)) continue;
+      const m = l.match(/\b(\d{1,2}\s+(?:janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre|january|february|march|april|may|june|july|august|september|october|november|december)\.?\s+\d{2,4})\b/i);
+      if (m) { result.date = tryParseDate(m[1]); if (result.date) break; }
+    }
   }
 
-  // 3. Date facture
-  const dateMatches = [
-    /date\s*(?:de\s*)?(?:facture|facturation|emission)?\s*[:.]?\s*(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/i,
-    /\b(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})\b/,
-  ];
-  for (const re of dateMatches) {
-    const m = text.match(re);
-    if (m) {
-      const parts = m[1].split(/[\/\-\.]/);
-      if (parts.length === 3) {
-        let [d, mo, y] = parts;
-        if (y.length === 2) y = (parseInt(y) > 50 ? '19' : '20') + y;
-        if (parseInt(d) > 31) [d, y] = [y, d];
-        result.date = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-        break;
+  // ============== 4. Date d'échéance ==============
+  result.dueDate = findDateAfter(text, [
+    "date\\s*d[\'’]?\\s*[ée]ch[ée]ance",
+    "[ée]ch[ée]ance",
+    "exigible\\s*(?:le)?",
+    "[àa]\\s*payer\\s*(?:avant|le)",
+    "payable\\s*(?:le|au)",
+  ]);
+  // "Reste à payer 129,10 EUR au 02/05/2026" → cherche "au DD/MM/YYYY"
+  if (!result.dueDate) {
+    const m = text.match(/reste\s*[àa]\s*payer.{0,40}au\s+(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/i);
+    if (m) result.dueDate = tryParseDate(m[1]);
+  }
+  // Échéance relative
+  if (!result.dueDate && result.date) {
+    result.dueDate = applyRelativeDue(result.date, text);
+  }
+
+  // Fallback numéro : si on a une date mais pas de numéro, chercher dans les 3 lignes
+  // précédant la date un nombre court (5-15 caractères, alphanumériques) qui ressemble à un numéro
+  if (!result.number && result.date) {
+    const lines = text.split(/\r?\n/);
+    const dateRe = /(\d{1,2}\s*[\/\-\.]\s*\d{1,2}\s*[\/\-\.]\s*\d{2,4})/;
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(dateRe);
+      if (m) {
+        const d = tryParseDate(m[1]);
+        if (d === result.date) {
+          // Cherche dans les 3 lignes précédentes un numéro PUREMENT numérique ou avec lettres+chiffres
+          for (let j = i - 1; j >= Math.max(0, i - 4); j--) {
+            const t = lines[j].trim();
+            // Doit être : seulement chiffres (5-15) OU lettres-suivies-de-chiffres
+            if (/^\d{5,15}$/.test(t) || /^[A-Z]{1,4}\d{4,12}$/i.test(t) || /^\d{1,4}[\.\-\/]\d{2,8}([\.\-\/]\d{2,8})?$/.test(t)) {
+              // Refuser si ressemble à une date pure
+              if (/^\d{1,2}[\.\-\/]\d{1,2}[\.\-\/]\d{2,4}$/.test(t)) continue;
+              // Refuser numéros trop courts
+              if (t.length < 4) continue;
+              result.number = t;
+              break;
+            }
+          }
+          if (result.number) break;
+        }
       }
     }
   }
 
-  // 4. Échéance (date d'échéance / à payer avant / etc.)
-  const dueMatches = [
-    /(?:date\s*(?:d[''])?\s*[ée]ch[ée]ance|[ée]ch[ée]ance|[àa]\s*payer\s*(?:avant|le)|payable\s*le)\s*[:.]?\s*(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})/i,
-  ];
-  for (const re of dueMatches) {
-    const m = text.match(re);
+  // ============== 5. Mode de règlement ==============
+  if (/virement\s*instantan[ée]/i.test(text)) result.paymentMode = 'virement';
+  else if (/virement/i.test(text)) result.paymentMode = 'virement';
+  else if (/pr[ée]l[èe]vement|automatique\s*pr[ée]lev/i.test(text)) result.paymentMode = 'prelevement';
+  else if (/ch[èe]que/i.test(text)) result.paymentMode = 'cheque';
+  else if (/carte\s*bancaire|\bcb\b|paid\s*by\s*card/i.test(text)) result.paymentMode = 'cb';
+  else if (/esp[èe]ces?\b/i.test(text)) result.paymentMode = 'especes';
+  else if (/\blcr\b|traite/i.test(text)) result.paymentMode = 'lcr';
+
+  // ============== 6-7-8. Totaux : tentative parseStackedTotals d'abord (cas Aredis) ==============
+  const stacked = parseStackedTotals(text);
+  if (stacked.total != null) result.total = stacked.total;
+  if (stacked.vat != null) result.vat = stacked.vat;
+  if (stacked.totalTtc != null) result.totalTtc = stacked.totalTtc;
+
+  // ============== 6. Total HT ==============
+  if (result.total == null) {
+    result.total = findAmountAfter(text, [
+    'total\\s*ht\\s*net',
+    'total\\s*net\\s*ht',
+    'total\\s*ex\\s*vat',
+    'sous[\\s-]*total\\s*h\\.?t\\.?',
+    'total\\s*de\\s*la\\s*facture\\s*ht',
+    'total\\s*hors\\s*taxes?',
+    'total\\s*h\\.?t\\.?',
+    'montant\\s*total\\s*ht',
+    'montant\\s*ht',
+    'total\\s*forfait\\s*ht',
+    'forfait\\s*total\\s*ht',
+    'total\\s*ht',
+    ]);
+  }
+
+  // ============== 7. TVA ==============
+  if (isVatExempt(text) && result.vat == null) {
+    result.vat = 0;
+  } else if (result.vat == null) {
+    result.vat = findAmountAfter(text, [
+      'total\\s*tva',
+      'montant\\s*tva',
+      'total\\s*tax(?!es)',
+      '^\\s*tva\\s*$',
+    ]);
+    if (result.vat != null && (result.vat < 0 || result.vat > 100000)) result.vat = null;
+  }
+
+  // ============== 8. Total TTC ==============
+  if (result.totalTtc == null) {
+    result.totalTtc = findAmountAfter(text, [
+    'somme\\s*[àa]\\s*payer\\s*ttc',
+    'total\\s*de\\s*la\\s*facture\\s*ttc',
+    'total\\s*ttc',
+    'montant\\s*ttc',
+    'total\\s*toutes\\s*taxes\\s*comprises',
+    'net\\s*[àa]\\s*payer\\s*ttc',
+    'net\\s*[àa]\\s*payer',
+    'solde\\s*d[uû]',
+    'amount\\s*due',
+    '^total\\s*$',  // "Total" seul sur ligne
+    '^total(?!\\s+(?:ht|hors|de\\s+la\\s+facture\\s+ht|net\\s+ht|tva|tax|ex))\\b',  // "TOTAL ..." mais pas "TOTAL HT", "TOTAL DE LA FACTURE HT", etc.
+    ]);
+  }
+  // Fallback PUM : "Acompte perçu n° XXX du DD/MM/YY :   25,20"
+  if (result.totalTtc == null) {
+    const m = text.match(/acompte\s*per[çc]u[^:]*:\s*(\d+[\.,]\d+)/i);
     if (m) {
-      const parts = m[1].split(/[\/\-\.]/);
-      if (parts.length === 3) {
-        let [d, mo, y] = parts;
-        if (y.length === 2) y = '20' + y;
-        if (parseInt(d) > 31) [d, y] = [y, d];
-        result.dueDate = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-        break;
+      const v = parseFrNumber(m[1]);
+      if (!isNaN(v) && v > 0) result.totalTtc = v;
+    }
+  }
+  // Fallback VAT spécifique : "Dont TVA perçue : 4,20" (PUM)
+  if (result.vat == null || result.vat === 0) {
+    const m = text.match(/dont\s+tva\s+per[çc]ue\s*:?\s*(\d+[\.,]\d+)/i);
+    if (m) {
+      const v = parseFrNumber(m[1]);
+      if (!isNaN(v) && v > 0) result.vat = v;
+    }
+  }
+  // Fallback Bruneau : "20,00 % 107,58 21,52" + ligne suivante "129,10"
+  // → taux=20% / base HT=107,58 / TVA=21,52, puis TTC sur ligne suivante
+  // Note : Bruneau a parfois un HT principal (105) + des frais (2.58) qui forment
+  // une "base soumise à TVA" différente. Le vrai TTC est donné explicitement.
+  {
+    const lines = text.split(/\r?\n/);
+    for (let i = 0; i < lines.length - 1; i++) {
+      const line = lines[i];
+      // Pattern "20,00 % 107,58 21,52" — un taux suivi de 2 nombres
+      const m = line.match(/^\s*(\d+[\.,]\d{1,2})\s*%\s+(\d+(?:[\s\.,]\d{3})*[\.,]\d{1,2})\s+(\d+(?:[\s\.,]\d{3})*[\.,]\d{1,2})\s*$/);
+      if (m) {
+        const tauxV = parseFrNumber(m[1]);
+        const baseV = parseFrNumber(m[2]);
+        const vatV = parseFrNumber(m[3]);
+        // Vérifier cohérence : base * taux/100 ≈ vat
+        if (Math.abs(baseV * tauxV / 100 - vatV) < 0.05 && baseV > 0 && vatV > 0) {
+          if (result.vat == null) result.vat = vatV;
+          // Le TTC est sur la ligne suivante (un seul nombre)
+          for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+            const tn = lines[j].trim();
+            if (!tn) continue;
+            const m2 = tn.match(/^\s*(\d+(?:[\s\.,]\d{3})*[\.,]\d{1,2})\s*€?\s*$/);
+            if (m2) {
+              const ttcV = parseFrNumber(m2[1]);
+              if (Math.abs(baseV + vatV - ttcV) < 0.05) {
+                // On force le TTC trouvé (priorité à cette détection sur la cohérence)
+                result.totalTtc = ttcV;
+                break;
+              }
+            }
+          }
+          break;
+        }
       }
     }
   }
 
-  // 5. Total HT
-  const totalMatches = [
-    /total\s*(?:net\s*)?h\.?t\.?\s*[:.]?\s*([\d\s\.,]+)\s*€?/i,
-    /montant\s*h\.?t\.?\s*[:.]?\s*([\d\s\.,]+)\s*€?/i,
-    /net\s*[àa]\s*payer\s*h\.?t\.?\s*[:.]?\s*([\d\s\.,]+)\s*€?/i,
-    /total\s*hors\s*taxes?\s*[:.]?\s*([\d\s\.,]+)\s*€?/i,
-  ];
-  for (const re of totalMatches) {
-    const m = text.match(re);
-    if (m) { const v = parseFrNumber(m[1]); if (!isNaN(v)) { result.total = v; break; } }
-  }
-
-  // 6. TVA
-  const vatMatches = [
-    /(?:total\s*)?(?:montant\s*)?t\.?v\.?a\.?\s*(?:\d+[\s,\.]*\d*\s*%)?\s*[:.]?\s*([\d\s\.,]+)\s*€?/i,
-    /(?:total\s*)?taxes?\s*[:.]?\s*([\d\s\.,]+)\s*€?/i,
-  ];
-  for (const re of vatMatches) {
-    const m = text.match(re);
-    if (m) { const v = parseFrNumber(m[1]); if (!isNaN(v) && v > 0 && v < 50000) { result.vat = v; break; } }
-  }
-
-  // 7. Total TTC
-  const ttcMatches = [
-    /total\s*t\.?t\.?c\.?\s*[:.]?\s*([\d\s\.,]+)\s*€?/i,
-    /net\s*[àa]\s*payer\s*(?:t\.?t\.?c\.?|en\s*euros)?\s*[:.]?\s*([\d\s\.,]+)\s*€?/i,
-    /montant\s*t\.?t\.?c\.?\s*[:.]?\s*([\d\s\.,]+)\s*€?/i,
-    /total\s*toutes\s*taxes\s*comprises\s*[:.]?\s*([\d\s\.,]+)\s*€?/i,
-  ];
-  for (const re of ttcMatches) {
-    const m = text.match(re);
-    if (m) { const v = parseFrNumber(m[1]); if (!isNaN(v)) { result.totalTtc = v; break; } }
-  }
-
-  // 8. Si on a HT mais pas TTC, on calcule à 20% (et inverse)
+  // 9. Cohérence HT / TVA / TTC
   if (result.total != null && result.totalTtc == null) {
-    if (result.vat != null) result.totalTtc = result.total + result.vat;
+    if (result.vat != null) result.totalTtc = +(result.total + result.vat).toFixed(2);
     else result.totalTtc = +(result.total * 1.20).toFixed(2);
   } else if (result.total == null && result.totalTtc != null) {
-    result.total = +(result.totalTtc / 1.20).toFixed(2);
-    if (result.vat == null) result.vat = +(result.totalTtc - result.total).toFixed(2);
+    if (result.vat != null && result.vat > 0) result.total = +(result.totalTtc - result.vat).toFixed(2);
+    else if (result.vat === 0) result.total = result.totalTtc;
+    else result.total = +(result.totalTtc / 1.20).toFixed(2);
   }
   if (result.total != null && result.totalTtc != null && result.vat == null) {
     result.vat = +(result.totalTtc - result.total).toFixed(2);
   }
+  // Sanity check : si TVA non applicable mais HT < TTC, forcer HT = TTC
+  // (cas Asplomberie : "Total HT" est un en-tête de colonne mal capté, le vrai HT = TTC)
+  if (result.vat === 0 && result.totalTtc != null && result.total != null
+      && result.total < result.totalTtc - 0.01) {
+    result.total = result.totalTtc;
+  }
+  // Sanity check : si HT et TTC identiques mais TVA détectée > 0, on corrige TTC
+  // (cas PUM : HT=21 et "TOTAL TTC" a aussi capté 21 par erreur, mais TVA=4.20 est correcte)
+  if (result.total != null && result.totalTtc != null && result.vat != null && result.vat > 0
+      && Math.abs(result.total - result.totalTtc) < 0.01) {
+    result.totalTtc = +(result.total + result.vat).toFixed(2);
+  }
+  // Sanity check : si HT et TTC identiques ET TVA non détectée (ou null), on force VAT=0
+  if (result.total != null && result.totalTtc != null && Math.abs(result.total - result.totalTtc) < 0.01
+      && (result.vat == null || result.vat === 0)) {
+    result.vat = 0;
+  }
+  // Sanity : TTC ne peut pas être < HT
+  if (result.total != null && result.totalTtc != null && result.totalTtc < result.total - 0.01) {
+    [result.total, result.totalTtc] = [result.totalTtc, result.total];
+    result.vat = +(result.totalTtc - result.total).toFixed(2);
+  }
+  // Sanity : si la TVA est PLUS GRANDE que le HT (cas ASTBTP : "TVA"→745, en réalité HT)
+  // ET que HT+VAT = TTC (mathématiquement OK), on inverse HT et VAT
+  if (result.total != null && result.vat != null && result.totalTtc != null) {
+    if (result.vat > result.total && Math.abs(result.total + result.vat - result.totalTtc) < 0.05) {
+      // Vérifier que le swap fait sens : nouvelle TVA doit être 5%, 10%, 20% du nouveau HT
+      const newHt = result.vat;
+      const newVat = result.total;
+      const ratio = newVat / newHt;
+      if (ratio > 0.04 && ratio < 0.25) {
+        result.total = newHt;
+        result.vat = newVat;
+      }
+    }
+  }
 
-  // 9. Lignes
-  result.lines = parseInvoiceLines(text);
+  // ============== 10. Lignes article ==============
+  result.lines = parseInvoiceLines(text, result);
 
   return result;
 }
 
+// Lignes à ignorer (entêtes, totaux, sous-lignes parasites)
 /**
- * Extrait les lignes article d'un texte de facture.
- * Format générique attendu par ligne (souplesse nécessaire) :
- *   [CODE] DESIGNATION ... QTE ... PU ... TOTAL
- * Stratégie : on cherche les lignes qui se terminent par 2 ou 3 nombres décimaux,
- * dont le dernier est plausiblement = qté * pu (à 5% près).
+ * Préprocesseur : reconstruit les lignes "à colonnes éclatées" comme dans Asplomberie.
+ * Deux cas gérés :
+ *  A) En-tête de tableau sur UNE ligne avec plusieurs mots-clés → on regroupe les
+ *     lignes suivantes par paquets de N
+ *  B) En-tête éclaté EN COLONNE (chaque mot-clé sur sa propre ligne) → on détecte un
+ *     bloc consécutif de mots-clés colonnes, on en déduit N, et on regroupe.
  */
-function parseInvoiceLines(text) {
-  const lines = [];
-  const rawLines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+function reglueColumnLines(text) {
+  const lines = text.split(/\r?\n/);
+  const out = [];
+  let i = 0;
 
-  for (const raw of rawLines) {
-    // ignorer lignes qui contiennent des mots-clés totaux/entêtes (en début OU avec keywords forts au milieu)
-    if (/^(total|tva|h\.?t\.?|t\.?t\.?c\.?|sous-total|net\s*[àa]\s*payer|montant|remise|escompte|page|date|n[°o]|client|adresse|tel|fax|email|siret|tva\s*intra)/i.test(raw)) continue;
-    // ignorer aussi si la ligne contient un mot-clé de facture/document (évite "Facture N° FA-2026...")
-    if (/\b(facture|invoice|bon\s*de\s*commande|bon\s*de\s*livraison|devis)\s*(n[°o]|num|#|:)/i.test(raw)) continue;
-    if (/\b(total|sous[\s-]*total|montant\s+(ht|ttc)|net\s+[àa]\s+payer|tva\s+\d)/i.test(raw)) continue;
-    if (raw.length < 8) continue;
+  // Mots-clés d'en-têtes de colonnes (français + anglais, mono ou multi-mots)
+  const isHeaderToken = (s) => {
+    const t = s.toLowerCase().trim().replace(/[^a-z0-9àéèêûôî\s]/g, '').trim();
+    if (!t) return false;
+    return /^(description|type|qt[ée]|quantit[ée]|quantity|prix(\s+unitaire(\s+ht)?)?|price|selling\s*price?|montant|amount|gross(\s+amount)?|total(\s+ht|\s+ttc)?|unit[ée]?|p\.?u\.?(\s+ht)?|tva|vat(\s+\%)?|d[ée]signation|hors\s+taxe|t\.?t\.?c\.?|net|nº|n°|n\b|code|reference|ref|garantie|incidence)$/.test(t);
+  };
 
-    // chercher 2-3 nombres en fin de ligne
-    const numRe = /([\d]+(?:[.,\s][\d]+)*(?:[.,][\d]{1,4})?)/g;
-    const allNums = [];
-    let m;
-    while ((m = numRe.exec(raw)) !== null) {
-      allNums.push({ str: m[1], idx: m.index, len: m[0].length });
-    }
-    if (allNums.length < 2) continue;
+  while (i < lines.length) {
+    const line = lines[i].trim();
 
-    // Le dernier nombre = total ligne ; avant-dernier = PU ; avant si présent = qté
-    const lastN = allNums[allNums.length - 1];
-    const totalLine = parseFrNumber(lastN.str);
-    if (isNaN(totalLine) || totalLine <= 0 || totalLine > 50000) continue;
+    // ----- CAS A : en-tête sur une seule ligne -----
+    const headerKeywords = ['description', 'type', 'qté', 'qte', 'quantité', 'quantite', 'quantity', 'prix', 'price', 'montant', 'amount', 'total', 'unité', 'unite', 'unit', 'p.u', 'pu', 'tva', 'designation', 'désignation'];
+    const lineLc = line.toLowerCase();
+    const matchedKw = headerKeywords.filter(k => lineLc.includes(k));
 
-    const puN = allNums[allNums.length - 2];
-    const pu = parseFrNumber(puN.str);
-    if (isNaN(pu) || pu <= 0 || pu > 10000) continue;
-
-    let qty = 1;
-    let qtyN = null;
-    if (allNums.length >= 3) {
-      qtyN = allNums[allNums.length - 3];
-      const q = parseFrNumber(qtyN.str);
-      if (!isNaN(q) && q > 0 && q < 10000) {
-        // vérifier cohérence : qty * pu ~= totalLine (à 5% près)
-        const expected = q * pu;
-        if (Math.abs(expected - totalLine) / totalLine < 0.06) {
-          qty = q;
-        } else {
-          qtyN = null; // on garde qty=1
-        }
-      } else {
-        qtyN = null;
+    if (matchedKw.length >= 3 && line.split(/\s+/).length <= 12) {
+      out.push(line);
+      i++;
+      let consecutiveShort = 0, probeIdx = i;
+      while (probeIdx < Math.min(i + 8, lines.length) && lines[probeIdx].trim().length > 0) {
+        if (lines[probeIdx].trim().length < 30) consecutiveShort++;
+        probeIdx++;
+      }
+      if (consecutiveShort >= 4) {
+        const remaining = collectTableLines(lines, i);
+        const merged = regroupByGuessedN(remaining, matchedKw.length);
+        out.push(...merged);
+        i += remaining.length;
+        continue;
       }
     }
 
-    // partie à gauche du premier nombre utilisé = code + désignation
-    const cutIdx = qtyN ? qtyN.idx : puN.idx;
-    let leftPart = raw.slice(0, cutIdx).trim();
-    if (!leftPart || leftPart.length < 3) continue;
+    // ----- CAS B : en-tête éclaté (mots-clés en colonne, chacun sur sa ligne) -----
+    if (isHeaderToken(line)) {
+      let headerCount = 1;
+      let probeIdx = i + 1;
+      while (probeIdx < lines.length && isHeaderToken(lines[probeIdx])) {
+        headerCount++;
+        probeIdx++;
+      }
+      if (headerCount >= 3) {
+        // On a détecté un en-tête éclaté de N colonnes
+        const N = headerCount;
+        // Garde les en-têtes en sortie (concaténés)
+        out.push(lines.slice(i, i + N).map(s => s.trim()).join(' | '));
+        i = probeIdx;
+        // Collecter les lignes du tableau
+        const remaining = collectTableLines(lines, i);
+        const merged = regroupByGuessedN(remaining, N);
+        out.push(...merged);
+        i += remaining.length;
+        continue;
+      }
+    }
 
-    // tenter de séparer code et désignation : code = premier token alphanumérique
+    out.push(line);
+    i++;
+  }
+  return out.join('\n');
+}
+
+// Collecte les lignes successives d'un tableau jusqu'à un séparateur (total/ligne vide/footer)
+function collectTableLines(lines, startIdx) {
+  const remaining = [];
+  for (let k = startIdx; k < lines.length; k++) {
+    const t = lines[k].trim();
+    if (!t) {
+      // Ligne vide : on arrête seulement si on a déjà collecté quelque chose
+      if (remaining.length > 0 && remaining.length % 4 < 2) break;
+      continue;
+    }
+    if (/^(total|sous-total|tva|h\.?t\.?\s|t\.?t\.?c\.?|net\s|montant|conditions|page|taxe\s|merci|escompte|p[ée]nalit|sub[\s-]?total|amount\s+due|total\s+ex\s+vat|payment\s+terms)/i.test(t)) break;
+    remaining.push(t);
+    if (remaining.length > 200) break;
+  }
+  return remaining;
+}
+
+// Regroupe les lignes par paquets de N (essaie aussi des N voisins pour trouver le meilleur)
+function regroupByGuessedN(remaining, hintN) {
+  let bestN = hintN;
+  let bestScore = -1;
+  // Essayer N = hintN, puis 5, 4, 3, 6
+  const candidates = [hintN, 5, 4, 3, 6, 2].filter((n, idx, arr) => arr.indexOf(n) === idx && n >= 2 && n <= 8);
+  for (const N of candidates) {
+    if (remaining.length < N) continue;
+    let score = 0;
+    let validBlocks = 0;
+    for (let k = 0; k + N <= remaining.length; k += N) {
+      const block = remaining.slice(k, k + N).join(' ');
+      const nums = (block.match(/\d+[\.,]?\d*/g) || []).length;
+      // Une ligne d'article réelle a 2-4 nombres (qté, pu, total, +éventuel %TVA)
+      if (nums >= 2 && nums <= 6) score++;
+      validBlocks++;
+    }
+    // Préférer N qui maximise score, puis qui colle au hintN
+    const fit = score / Math.max(1, validBlocks);
+    if (fit > bestScore || (fit === bestScore && N === hintN)) {
+      bestScore = fit;
+      bestN = N;
+    }
+  }
+  const result = [];
+  for (let k = 0; k + bestN <= remaining.length; k += bestN) {
+    const merged = remaining.slice(k, k + bestN).join(' ').replace(/\s+/g, ' ').trim();
+    result.push(merged);
+  }
+  const leftover = remaining.length % bestN;
+  if (leftover > 0) {
+    const merged = remaining.slice(-leftover).join(' ').replace(/\s+/g, ' ').trim();
+    if (merged && (merged.match(/\d/g) || []).length >= 2) result.push(merged);
+  }
+  return result;
+}
+
+const SKIP_LINE_RE = /^(total|sous[\s-]*total|tva|h\.?t\.?\s*$|t\.?t\.?c\.?|montant|remise|escompte|page\b|date\b|n[°o]\s|client|adresse|tel\b|fax\b|email|siret|tva\s*intra|conditions|mode\s*de|chantier|commande|pris\s*par|email|adresse|si[èe]ge|domicili|iban\b|bic\b|rib\b|paiement|num[ée]ro\b|code\s*client|coordonn[ée]es|banque\b|merci\b|en\s*cas|p[ée]nalit|conditions|garantie|date\s*estim|date\s*intervention|net\s*[aà]\s*payer|solde\s*d[uû]|acompte|reprise\s*sur\s*acompte|dont\s*tva|escompte|sommes?\s*d[ée]j|p[ée]riode\s*:|exigible|n[°o]\s*adh|expiration|expedition|exp[ée]dition|réf[ée]rence\s*comptable|p[ée]riode|d[ée]livré|origine|votre\s*ref|votre\s*commande|total\s*ex|payment\s*terms|account|reference|description\s*$|d[ée]signation\s*$|qte|qt[ée]\s*$|prix|montant\s*$|unit[ée]?\s*$)/i;
+
+const SKIP_SUB_LINE_RE = /^(dont\s+|de\s+|au\s+|le\s+|sur\s+|pour\s+|en\s+|à\s+|par\s+)/i;
+const ECO_LINE_RE = /eco[\s\-]*(?:part|contrib|cotisat|emball|deee|mobilier)/i;
+const FOOTER_RE = /(escompte|p[ée]nalit|d[ée]cret|article|merci|veuillez|nous\s+vous|paiement|virement|i?ban|bic|swift|signature|page\s+\d+\s*\/\s*\d+|sur\s+\d+|dispens[ée]|domicili|conditions?\s+g[ée]n)/i;
+
+/**
+ * Parse les lignes article d'un texte de facture.
+ * Heuristique : chaque ligne se termine généralement par 2-3 nombres (qté, PU, total ligne)
+ * et le total = qté × PU (à 6% près).
+ */
+function parseInvoiceLines(text, parsedInvoice) {
+  const lines = [];
+  // Préprocessing : reconstruire les lignes éclatées en colonnes
+  const preprocessed = reglueColumnLines(text);
+  const rawLines = preprocessed.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+
+  // Garde les totaux pour ne pas confondre la ligne "Total HT 94,99"
+  const knownTotals = new Set();
+  if (parsedInvoice) {
+    if (parsedInvoice.total != null) knownTotals.add(Math.round(parsedInvoice.total * 100));
+    if (parsedInvoice.totalTtc != null) knownTotals.add(Math.round(parsedInvoice.totalTtc * 100));
+    if (parsedInvoice.vat != null) knownTotals.add(Math.round(parsedInvoice.vat * 100));
+  }
+
+  for (let i = 0; i < rawLines.length; i++) {
+    const raw = rawLines[i];
+
+    // ----- Filtres préliminaires -----
+    if (raw.length < 6) continue;
+    if (SKIP_LINE_RE.test(raw)) continue;
+    if (FOOTER_RE.test(raw)) continue;
+    if (ECO_LINE_RE.test(raw)) continue;
+    if (SKIP_SUB_LINE_RE.test(raw)) continue; // sous-lignes "dont Eco-Part..."
+    // Lignes types tableau de TVA : "20,00 94,99 19,00" sans texte alpha
+    const alphaCount = (raw.match(/[a-zA-ZÀ-ÿ]/g) || []).length;
+    // Si très peu de lettres, on accepte uniquement si la ligne PRÉCÉDENTE a une description
+    // (cas Bruneau : "FI1 8304-915 EPSON..." puis "1 105,00 105,00 20,00")
+    let descFromPrev = '';
+    if (alphaCount < 4) {
+      // Chercher description sur 1-2 lignes précédentes (pas un en-tête de tableau)
+      for (let p = i - 1; p >= Math.max(0, i - 3); p--) {
+        const prev = rawLines[p];
+        if (!prev || prev.length < 4) continue;
+        if (SKIP_LINE_RE.test(prev) || FOOTER_RE.test(prev) || ECO_LINE_RE.test(prev)) continue;
+        const prevAlpha = (prev.match(/[a-zA-ZÀ-ÿ]/g) || []).length;
+        if (prevAlpha >= 4) {
+          // Vérifier que cette ligne précédente n'a pas déjà été utilisée comme ligne article
+          // (heuristique : peu de nombres en fin)
+          const prevNums = (prev.match(/\d+[\.,]\d+/g) || []).length;
+          if (prevNums <= 1) {
+            descFromPrev = prev;
+            break;
+          }
+        }
+      }
+      if (!descFromPrev) continue; // pas trouvé de description, on skip
+    }
+    // Filtres URL et codes longs
+    if (/https?:\/\/|www\.|@/.test(raw)) continue;
+    // Nettoyage : enlever "...." (points de suite Richardson) et remplacer par espace
+    const cleaned = raw.replace(/\.{3,}/g, ' ').replace(/\s+/g, ' ').trim();
+
+    // ----- Extraction des nombres -----
+    // Pattern : nombre potentiellement préfixé €. On accepte . et , comme séparateurs
+    // de milliers MAIS PAS l'espace (trop ambigu : "1 293,00" peut être "1" qty + "293,00" total)
+    const numRe = /(-?\d+(?:[\.,]\d{3})*(?:[\.,]\d{1,4})?)\s*€?/g;
+    const allNums = [];
+    let m;
+    while ((m = numRe.exec(cleaned)) !== null) {
+      const v = parseFrNumber(m[1]);
+      if (!isNaN(v)) allNums.push({ str: m[1], val: v, idx: m.index, len: m[0].length });
+    }
+    if (allNums.length < 2) continue;
+
+    // ----- Détecter total + PU + qty (en partant de la fin) -----
+    // Heuristique : si le dernier nombre est <= 25 et qu'il y a 4+ nombres dont l'avant-dernier
+    // est >= 1, le dernier est probablement un % TVA et le total est l'avant-dernier
+    let nums = allNums.slice(); // copie
+    if (nums.length >= 4) {
+      const last = nums[nums.length - 1];
+      // %TVA typique : 0, 5, 5.5, 10, 20 (et parfois autres taux <=25)
+      // Et le nombre avant est un montant > 1 (pas un autre %)
+      const beforeLast = nums[nums.length - 2];
+      if (last.val >= 0 && last.val <= 25 && beforeLast.val > 1) {
+        // Vérifier si l'avant-dernier serait cohérent comme total ligne
+        // Par exemple : "1 105,00 105,00 20,00" → last=20 (%TVA), beforeLast=105 (total)
+        nums = nums.slice(0, -1);
+      }
+    }
+
+    let qty = null, pu = null, totalLine = null, qtyN = null, puN = null;
+    const lastN = nums[nums.length - 1];
+
+    // Note : on ne skippe PAS si lastN matche un total connu — un article dont le total
+    // est égal au total HT global est parfaitement valide (Bruneau : 1 article à 105€,
+    // total global = 105€ aussi). On vérifie juste que ce n'est pas la ligne "Total HT 105".
+    // Détection : si la ligne contient un mot-clé "total" ET un seul nombre, on skip.
+    if (knownTotals.has(Math.round(lastN.val * 100))) {
+      // Skip seulement si la ligne ressemble à une ligne de TOTAL global, pas à un article
+      const looksLikeTotalLine = /^(?:total|sous[\s-]*total|montant|net\s+[àa]\s+payer|tva|hors|ttc|ht|amount|sub[\s-]?total)\b/i.test(cleaned);
+      if (looksLikeTotalLine) continue;
+      // Sinon on continue (ça peut être une ligne d'article dont le total = total global)
+    }
+
+    totalLine = lastN.val;
+    if (totalLine <= 0 || totalLine > 100000) continue;
+
+    // Cherche pu et qty : on teste des paires (pu, qty) parmi les derniers nombres
+    let bestMatch = null;
+    for (let pi = nums.length - 2; pi >= Math.max(0, nums.length - 5); pi--) {
+      const candPu = nums[pi];
+      if (candPu.val <= 0 || candPu.val > 50000) continue;
+
+      // Cas A : pas de qty (qty=1, pu=total)
+      if (Math.abs(candPu.val - totalLine) < 0.02 && totalLine < 50000) {
+        // Score privilégiant les "vrais" prix unitaires (pas 1 ni des nombres ronds suspects)
+        let scoreA = 0.9;
+        if (candPu.val > 1.5) scoreA += 0.4; // probable PU réel
+        if (!bestMatch || scoreA > bestMatch.score) {
+          bestMatch = { qty: 1, pu: candPu.val, qtyN: null, puN: candPu, score: scoreA };
+        }
+      }
+      // Cas B : qty est un nombre avant le pu
+      for (let qi = pi - 1; qi >= Math.max(0, pi - 3); qi--) {
+        const candQ = nums[qi];
+        if (candQ.val <= 0 || candQ.val > 10000) continue;
+        const expected = candQ.val * candPu.val;
+        const diff = Math.abs(expected - totalLine);
+        const rel = diff / totalLine;
+        if (rel < 0.02 || diff < 0.02) {
+          // Score : préférer les combinaisons où pu > 1 (un PU unitaire est rarement = 1)
+          let score = 1 - rel;
+          // Bonus si pu > 1 (PU plus probable que la quantité)
+          if (candPu.val > 1.5) score += 0.5;
+          // Bonus si qty est un entier "raisonnable"
+          if (Number.isInteger(candQ.val) && candQ.val <= 100) score += 0.3;
+          // Malus si qty a beaucoup de décimales (probable que ce soit un PU déguisé)
+          if (!Number.isInteger(candQ.val) && candQ.val > 10) score -= 0.4;
+          // Malus si pu == 1 et qty ressemble à un montant (>10)
+          if (candPu.val === 1 && candQ.val > 10) score -= 0.5;
+          if (!bestMatch || score > bestMatch.score) {
+            bestMatch = { qty: candQ.val, pu: candPu.val, qtyN: candQ, puN: candPu, score };
+          }
+        }
+      }
+    }
+
+    if (!bestMatch) continue;
+    qty = bestMatch.qty;
+    pu = bestMatch.pu;
+    qtyN = bestMatch.qtyN;
+    puN = bestMatch.puN;
+
+    // ----- Texte à gauche = code + désignation -----
+    const cutIdx = qtyN ? qtyN.idx : puN.idx;
+    let leftPart = cleaned.slice(0, cutIdx).trim();
+    // Si la qty est en début de ligne (pas de texte avant), la description est ENTRE qty et pu
+    // (cas BigChange : "1.000 DEV/1315 - JobWatch Software ... 59.95 0.00 0.00 59.95")
+    if ((!leftPart || leftPart.length < 3) && qtyN && puN) {
+      const middlePart = cleaned.slice(qtyN.idx + qtyN.len, puN.idx).trim();
+      if (middlePart && middlePart.length >= 3) {
+        leftPart = middlePart;
+      }
+    }
+    // Si pas assez de texte à gauche mais qu'on a une description sur la ligne précédente, l'utiliser
+    if ((!leftPart || leftPart.length < 3) && descFromPrev) {
+      leftPart = descFromPrev;
+    } else if (!leftPart || leftPart.length < 3) {
+      continue;
+    }
+
+    // Détecter unité (U, ML, KG, etc.) en fin de leftPart
+    let unit = 'U';
+    const unitMatch = leftPart.match(/\s+(U|UN|ML|M[éE]TRE|M2|M²|M³|M3|KG|G|L|BO[ÎI]TE|LOT|PI[èE]CE|JOURS|JOUR|HEURE|H|FORFAIT|EN[Ss])\s*$/i);
+    if (unitMatch) {
+      unit = unitMatch[1].toUpperCase();
+      leftPart = leftPart.slice(0, unitMatch.index).trim();
+      if (unit === 'METRE' || unit === 'MÉTRE' || unit === 'MÈTRE') unit = 'ML';
+    }
+
+    // Code = premier token alphanumérique si formaté comme un code (lettres + chiffres + tirets)
     let code = '';
     let desig = leftPart;
-    const codeMatch = leftPart.match(/^([A-Z0-9][A-Z0-9_\-\.\/]{2,18})\s+(.+)$/i);
-    if (codeMatch) { code = codeMatch[1]; desig = codeMatch[2]; }
+    const codeMatch = leftPart.match(/^([A-Z][A-Z0-9_\-\.\/]{2,18}|\d{4,12}|[A-Z]{1,4}\d{2,12})\s+(.+)$/i);
+    if (codeMatch) {
+      // Vérifie que c'est un code et pas le début d'une phrase
+      const tok = codeMatch[1];
+      if (tok.length >= 3 && /[\d\-\/]/.test(tok)) {
+        code = tok;
+        desig = codeMatch[2];
+      }
+    }
 
-    desig = desig.replace(/\s+/g, ' ').trim();
+    desig = desig.replace(/^[\s\-:]+|[\s\-:]+$/g, '').replace(/\s+/g, ' ').trim();
+    // Si la désignation est vide ou trop courte ET qu'on a trouvé une description sur la ligne précédente, l'utiliser
+    if ((desig.length < 2 || /^\d+$/.test(desig)) && descFromPrev) {
+      // Extraire code de la prev si présent
+      const prevCodeMatch = descFromPrev.match(/^([A-Z][A-Z0-9_\-\.\/]{2,18}|\d{5,12}|[A-Z]{1,4}\d{2,12})\s+(.+)$/i);
+      if (prevCodeMatch && /[\d\-\/]/.test(prevCodeMatch[1])) {
+        if (!code) code = prevCodeMatch[1];
+        desig = prevCodeMatch[2];
+      } else {
+        desig = descFromPrev;
+      }
+      desig = desig.replace(/^[\s\-:]+|[\s\-:]+$/g, '').replace(/\s+/g, ' ').trim();
+    }
+    if (desig.length < 2) continue;
     if (desig.length > 100) desig = desig.slice(0, 100);
 
-    lines.push({
-      code,
-      designation: desig,
-      qty,
-      unit: 'U',
-      pu,
-      total: totalLine,
-    });
+    // Filtres anti-faux-positifs
+    if (/^(date|n[°o]|page|tva|total|montant|sous|net|reste|escompte|reference|libell|code\b)/i.test(desig)) continue;
+
+    lines.push({ code, designation: desig, qty, unit, pu, total: totalLine });
   }
 
   return lines;
