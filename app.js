@@ -854,6 +854,10 @@ function parseInvoice(rawText) {
   if (!result.dueDate && result.date) {
     result.dueDate = applyRelativeDue(result.date, text);
   }
+  // Si la facture est déjà payée par carte bancaire ou comptant, échéance = date facture
+  if (!result.dueDate && result.date && /carte\s*bancaire|esp[èe]ces?\s*comptant|pay[ée]\s*comptant|paiement\s*comptant/i.test(text)) {
+    result.dueDate = result.date;
+  }
 
   // Fallback numéro : si on a une date mais pas de numéro, chercher dans les 3 lignes
   // précédant la date un nombre court (5-15 caractères, alphanumériques) qui ressemble à un numéro
@@ -905,15 +909,16 @@ function parseInvoice(rawText) {
     'total\\s*ht\\s*net',
     'total\\s*net\\s*ht',
     'total\\s*ex\\s*vat',
-    'sous[\\s-]*total\\s*h\\.?t\\.?',
     'total\\s*de\\s*la\\s*facture\\s*ht',
     'total\\s*hors\\s*taxes?',
+    'total\\s*h\\.?t\\.?\\s*eur',  // Format PUM : "TOTAL HT EUR"
     'total\\s*h\\.?t\\.?',
     'montant\\s*total\\s*ht',
     'montant\\s*ht',
     'total\\s*forfait\\s*ht',
     'forfait\\s*total\\s*ht',
     'total\\s*ht',
+    'sous[\\s-]*total\\s*h\\.?t\\.?',  // En dernier : sous-total < total réel (frais à ajouter)
     ]);
   }
 
@@ -1202,8 +1207,9 @@ function parseInvoiceLines(text, parsedInvoice) {
 
   // === PARSER PRIORITAIRE PUM ===
   // Le format PUM est très spécifique (PU.NET PU.UNIT MONTANT DESIGNATION CODE UNITE QTE)
-  // Si on est sur une facture PUM, on utilise directement le parser dédié
-  if (/\bPUM\b/.test(text) && (parsedInvoice && /^PUM/i.test(parsedInvoice.supplier || ''))) {
+  // Activation : on détecte "PUM" comme mot isolé en début de ligne (en-tête fournisseur)
+  // OU "mypum.fr" / "MARSEILLE13015" + "PUM" dans le texte
+  if (/^PUM\s*$/m.test(text) || /mypum\.fr/i.test(text)) {
     const pumLines = parsePumLines(rawLines);
     if (pumLines.length > 0) return pumLines;
   }
