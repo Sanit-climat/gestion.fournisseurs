@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FactureCheck - Sanit Climat</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.0.4/tesseract.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<link rel="stylesheet" href="styles.css?v=20260428">
+</head>
+<body>
+
+<!-- HEADER -->
+<header class="app-header">
+  <div class="header-inner">
+    <div class="brand">
+      <div class="brand-logo">
+        <svg viewBox="0 0 40 40" width="32" height="32">
+          <rect x="4" y="4" width="32" height="32" rx="8" fill="var(--accent)"/>
+          <path d="M12 14h16M12 20h12M12 26h16" stroke="var(--bg-0)" stroke-width="2.5" stroke-linecap="round"/>
+          <circle cx="30" cy="26" r="5" fill="var(--bg-0)" stroke="var(--accent)" stroke-width="2"/>
+          <path d="M27.5 26l2 2 3-3" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <h1>FactureCheck</h1>
+        <span class="brand-sub">Sanit Climat · Vérification prix fournisseurs</span>
+      </div>
+    </div>
+    <nav class="main-nav" id="mainNav">
+      <button class="nav-btn active" data-tab="scan">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10"/></svg>
+        Scan factures
+      </button>
+      <button class="nav-btn" data-tab="articles">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7L12 3 4 7m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+        Base articles
+      </button>
+      <button class="nav-btn" data-tab="suppliers">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l1-5h16l1 5M3 9v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9M3 9h18M9 13h6"/></svg>
+        Fournisseurs
+      </button>
+      <button class="nav-btn" data-tab="dashboard">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 13h4l3-9 4 18 3-9h4"/></svg>
+        Écarts & alertes
+      </button>
+      <button class="nav-btn" data-tab="history">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        Historique
+      </button>
+      <button class="nav-btn" data-tab="payment">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg>
+        Suivi facturier
+      </button>
+      <button class="nav-btn" data-tab="account">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        Comptes fournisseurs
+      </button>
+      <button class="nav-btn" data-tab="settings">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+        Réglages
+      </button>
+    </nav>
+    <div class="header-status">
+      <span class="status-dot" id="fbDot"></span>
+      <span id="fbStatus">Local</span>
+    </div>
+  </div>
+</header>
+
+<!-- MAIN CONTENT -->
+<main class="app-main">
+
+  <!-- ============== ONGLET SCAN FACTURES ============== -->
+  <section class="tab-panel active" id="tab-scan">
+    <div class="page-header">
+      <div>
+        <h2>Scanner une facture fournisseur</h2>
+        <p class="muted">Glisse-dépose un PDF ou une image. L'extraction détecte fournisseur, date, articles et prix.</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-ghost" id="btnRescan">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12a9 9 0 0 1 15-6.7L21 8M21 3v5h-5M21 12a9 9 0 0 1-15 6.7L3 16M3 21v-5h5"/></svg>
+          Recommencer
+        </button>
+      </div>
+    </div>
+
+    <div class="scan-grid">
+      <div class="dropzone-wrap">
+        <div class="dropzone" id="dropzone">
+          <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg,.webp" multiple hidden>
+          <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+          </svg>
+          <h3>Dépose ta facture ici</h3>
+          <p>PDF · PNG · JPG · WEBP — possibilité de plusieurs fichiers</p>
+          <button class="btn btn-primary" id="btnPick">Parcourir mes fichiers</button>
+          <div class="format-hints">
+            <span>Cedeo</span>
+            <span>Brossette</span>
+            <span>Rexel</span>
+            <span>Würth</span>
+            <span>Point P</span>
+            <span>Auto-détection</span>
+          </div>
+        </div>
+        <div class="ocr-progress" id="ocrProgress" hidden>
+          <div class="bar"><div class="bar-fill" id="ocrBar"></div></div>
+          <span id="ocrLabel">Préparation…</span>
+        </div>
+      </div>
+
+      <div class="extract-panel">
+        <div class="panel-head">
+          <h3>Extraction</h3>
+          <span class="chip chip-muted" id="extractStatus">En attente</span>
+        </div>
+
+        <div class="invoice-meta">
+          <div class="field">
+            <label>Fournisseur</label>
+            <div class="combo">
+              <input type="text" id="invSupplier" placeholder="Ex : Cedeo Marseille" list="supplierList">
+              <datalist id="supplierList"></datalist>
+            </div>
+          </div>
+          <div class="field">
+            <label>N° de facture</label>
+            <input type="text" id="invNumber" placeholder="FA-2026-…">
+          </div>
+          <div class="field">
+            <label>Date facture</label>
+            <input type="date" id="invDate">
+          </div>
+          <div class="field">
+            <label>Échéance</label>
+            <input type="date" id="invDueDate">
+          </div>
+          <div class="field">
+            <label>Total HT (€)</label>
+            <input type="number" step="0.01" id="invTotal" placeholder="0,00">
+          </div>
+          <div class="field">
+            <label>TVA (€)</label>
+            <input type="number" step="0.01" id="invVat" placeholder="0,00">
+          </div>
+          <div class="field">
+            <label>Total TTC (€)</label>
+            <input type="number" step="0.01" id="invTotalTtc" placeholder="0,00">
+          </div>
+          <div class="field">
+            <label>Mode de paiement</label>
+            <select id="invPaymentMode">
+              <option value="virement">Virement</option>
+              <option value="prelevement">Prélèvement</option>
+              <option value="cheque">Chèque</option>
+              <option value="cb">Carte bancaire</option>
+              <option value="especes">Espèces</option>
+              <option value="lcr">LCR / Traite</option>
+              <option value="autre">Autre</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="lines-head">
+          <h4>Lignes article détectées</h4>
+          <button class="btn btn-mini" id="btnAddLine">+ Ligne</button>
+        </div>
+        <div class="lines-table-wrap">
+          <table class="lines-table" id="linesTable">
+            <thead>
+              <tr>
+                <th>Code</th>
+                <th>Désignation</th>
+                <th>Qté</th>
+                <th>Unité</th>
+                <th>PU HT</th>
+                <th>Total</th>
+                <th>Réf. base</th>
+                <th>Écart</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="linesBody">
+              <tr class="empty-row"><td colspan="9">Aucune ligne — dépose une facture pour commencer.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="extract-actions">
+          <button class="btn btn-ghost" id="btnCancelInvoice">Annuler</button>
+          <button class="btn btn-primary" id="btnSaveInvoice">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2zM17 21v-8H7v8M7 3v5h8"/></svg>
+            Enregistrer la facture
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== ONGLET BASE ARTICLES ============== -->
+  <section class="tab-panel" id="tab-articles">
+    <div class="page-header">
+      <div>
+        <h2>Base articles fournisseurs</h2>
+        <p class="muted">Référentiel de prix. Les écarts sont calculés à partir de cette base.</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-ghost" id="btnImportArticles">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          Importer Excel
+        </button>
+        <button class="btn btn-ghost" id="btnExportArticles">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+          Exporter
+        </button>
+        <button class="btn btn-primary" id="btnNewArticle">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          Nouvel article
+        </button>
+      </div>
+    </div>
+
+    <div class="filters">
+      <input type="search" id="searchArticles" placeholder="Rechercher code, désignation…">
+      <select id="filterSupplier"><option value="">Tous fournisseurs</option></select>
+      <select id="filterCategory">
+        <option value="">Toutes catégories</option>
+        <option value="plomberie">Plomberie</option>
+        <option value="chaudiere">Chaudière</option>
+        <option value="vmc">VMC</option>
+        <option value="climatisation">Climatisation</option>
+        <option value="electricite">Électricité</option>
+        <option value="consommables">Consommables</option>
+        <option value="autre">Autre</option>
+      </select>
+      <span class="count-pill" id="articlesCount">0 articles</span>
+    </div>
+
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Code</th>
+            <th>Désignation</th>
+            <th>Fournisseur</th>
+            <th>Catégorie</th>
+            <th>Unité</th>
+            <th>Prix réf. HT</th>
+            <th>Mise à jour</th>
+            <th>Tolérance</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="articlesBody">
+          <tr class="empty-row"><td colspan="9">Aucun article — clique « Nouvel article » ou importe depuis Excel.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============== ONGLET FOURNISSEURS ============== -->
+  <section class="tab-panel" id="tab-suppliers">
+    <div class="page-header">
+      <div>
+        <h2>Fournisseurs</h2>
+        <p class="muted">Coordonnées, conditions et formats de facturation.</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-primary" id="btnNewSupplier">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          Nouveau fournisseur
+        </button>
+      </div>
+    </div>
+
+    <div class="suppliers-grid" id="suppliersGrid">
+      <div class="empty-card">Aucun fournisseur — ajoute-en un pour commencer.</div>
+    </div>
+  </section>
+
+  <!-- ============== ONGLET ÉCARTS & ALERTES ============== -->
+  <section class="tab-panel" id="tab-dashboard">
+    <div class="page-header">
+      <div>
+        <h2>Écarts & alertes prix</h2>
+        <p class="muted">Vue synthétique des écarts détectés sur les factures enregistrées.</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-ghost" id="btnExportEcarts">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+          Export rapport
+        </button>
+      </div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <span class="kpi-label">Factures analysées</span>
+        <span class="kpi-value" id="kpiInvoices">0</span>
+        <span class="kpi-sub" id="kpiInvoicesSub">— ce mois</span>
+      </div>
+      <div class="kpi-card kpi-ok">
+        <span class="kpi-label">Lignes conformes</span>
+        <span class="kpi-value" id="kpiOk">0</span>
+        <span class="kpi-sub">écart ≤ tolérance</span>
+      </div>
+      <div class="kpi-card kpi-warn">
+        <span class="kpi-label">Écarts modérés</span>
+        <span class="kpi-value" id="kpiWarn">0</span>
+        <span class="kpi-sub">2-5 % au-dessus</span>
+      </div>
+      <div class="kpi-card kpi-danger">
+        <span class="kpi-label">Écarts critiques</span>
+        <span class="kpi-value" id="kpiDanger">0</span>
+        <span class="kpi-sub">> 5 % au-dessus</span>
+      </div>
+      <div class="kpi-card kpi-info">
+        <span class="kpi-label">Surcoût total détecté</span>
+        <span class="kpi-value" id="kpiOvercost">0 €</span>
+        <span class="kpi-sub">vs base articles</span>
+      </div>
+    </div>
+
+    <div class="filters">
+      <select id="ecartPeriod">
+        <option value="all">Toutes périodes</option>
+        <option value="30">30 derniers jours</option>
+        <option value="90">3 derniers mois</option>
+        <option value="365">12 derniers mois</option>
+      </select>
+      <select id="ecartSupplier"><option value="">Tous fournisseurs</option></select>
+      <select id="ecartLevel">
+        <option value="">Tous écarts</option>
+        <option value="warn">Modérés</option>
+        <option value="danger">Critiques</option>
+      </select>
+    </div>
+
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Fournisseur</th>
+            <th>Facture</th>
+            <th>Article</th>
+            <th>Désignation</th>
+            <th>Qté</th>
+            <th>PU facturé</th>
+            <th>PU réf.</th>
+            <th>Écart</th>
+            <th>Surcoût</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="ecartsBody">
+          <tr class="empty-row"><td colspan="11">Aucun écart à afficher.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============== ONGLET SUIVI FACTURIER ============== -->
+  <section class="tab-panel" id="tab-payment">
+    <div class="page-header">
+      <div>
+        <h2>Suivi facturier</h2>
+        <p class="muted">Statuts, échéances, paiements. Vue opérationnelle pour piloter ce qui doit être payé.</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-ghost" id="btnExportPayment">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+          Export Excel
+        </button>
+      </div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <span class="kpi-label">Total dû</span>
+        <span class="kpi-value" id="kpiDue">0 €</span>
+        <span class="kpi-sub">factures non soldées</span>
+      </div>
+      <div class="kpi-card kpi-warn">
+        <span class="kpi-label">À payer cette semaine</span>
+        <span class="kpi-value" id="kpiWeek">0 €</span>
+        <span class="kpi-sub" id="kpiWeekCount">0 factures</span>
+      </div>
+      <div class="kpi-card kpi-danger">
+        <span class="kpi-label">En retard</span>
+        <span class="kpi-value" id="kpiLate">0 €</span>
+        <span class="kpi-sub" id="kpiLateCount">0 factures</span>
+      </div>
+      <div class="kpi-card kpi-info">
+        <span class="kpi-label">À vérifier</span>
+        <span class="kpi-value" id="kpiCheck">0</span>
+        <span class="kpi-sub">avant validation</span>
+      </div>
+      <div class="kpi-card kpi-ok">
+        <span class="kpi-label">Soldé ce mois</span>
+        <span class="kpi-value" id="kpiPaid">0 €</span>
+        <span class="kpi-sub" id="kpiPaidCount">0 factures</span>
+      </div>
+    </div>
+
+    <div class="filters">
+      <input type="search" id="searchPayment" placeholder="Rechercher fournisseur, n° facture…">
+      <select id="paymentStatus">
+        <option value="">Tous statuts</option>
+        <option value="to_check">À vérifier</option>
+        <option value="validated">Validée</option>
+        <option value="partial">Payée partiellement</option>
+        <option value="paid">Soldée</option>
+        <option value="dispute">Litige</option>
+      </select>
+      <select id="paymentSupplier"><option value="">Tous fournisseurs</option></select>
+      <select id="paymentDue">
+        <option value="">Toutes échéances</option>
+        <option value="late">En retard</option>
+        <option value="week">Cette semaine</option>
+        <option value="month">Ce mois</option>
+        <option value="future">À venir</option>
+      </select>
+    </div>
+
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Statut</th>
+            <th>Date</th>
+            <th>Échéance</th>
+            <th>Fournisseur</th>
+            <th>N° facture</th>
+            <th>Montant TTC</th>
+            <th>Payé</th>
+            <th>Reste dû</th>
+            <th>Écarts</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="paymentBody">
+          <tr class="empty-row"><td colspan="10">Aucune facture.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============== ONGLET COMPTES FOURNISSEURS ============== -->
+  <section class="tab-panel" id="tab-account">
+    <div class="page-header">
+      <div>
+        <h2>Comptes fournisseurs</h2>
+        <p class="muted">Solde courant, balance âgée, échéancier prévisionnel par fournisseur.</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-ghost" id="btnExportAccounts">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+          Export balance
+        </button>
+      </div>
+    </div>
+
+    <div class="kpi-grid">
+      <div class="kpi-card">
+        <span class="kpi-label">Solde global</span>
+        <span class="kpi-value" id="kpiAccTotal">0 €</span>
+        <span class="kpi-sub">tous fournisseurs</span>
+      </div>
+      <div class="kpi-card kpi-ok">
+        <span class="kpi-label">Non échu</span>
+        <span class="kpi-value" id="kpiAcc0">0 €</span>
+        <span class="kpi-sub">échéance future</span>
+      </div>
+      <div class="kpi-card kpi-warn">
+        <span class="kpi-label">0-30 jours</span>
+        <span class="kpi-value" id="kpiAcc30">0 €</span>
+        <span class="kpi-sub">retard léger</span>
+      </div>
+      <div class="kpi-card kpi-danger">
+        <span class="kpi-label">31-60 jours</span>
+        <span class="kpi-value" id="kpiAcc60">0 €</span>
+        <span class="kpi-sub">retard moyen</span>
+      </div>
+      <div class="kpi-card kpi-danger">
+        <span class="kpi-label">+90 jours</span>
+        <span class="kpi-value" id="kpiAcc90">0 €</span>
+        <span class="kpi-sub">retard critique</span>
+      </div>
+    </div>
+
+    <div class="account-layout">
+      <aside class="account-sidebar">
+        <div class="filters" style="margin-bottom:8px">
+          <input type="search" id="searchAccountSup" placeholder="Rechercher fournisseur…">
+        </div>
+        <div class="account-list" id="accountList">
+          <div class="empty-card" style="padding:24px;font-size:12px">Aucun fournisseur.</div>
+        </div>
+      </aside>
+
+      <div class="account-detail" id="accountDetail">
+        <div class="empty-card" style="padding:48px">Sélectionne un fournisseur dans la liste pour voir son compte.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============== ONGLET HISTORIQUE ============== -->
+  <section class="tab-panel" id="tab-history">
+    <div class="page-header">
+      <div>
+        <h2>Historique des factures</h2>
+        <p class="muted">Toutes les factures scannées et enregistrées.</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-ghost" id="btnExportInvoices">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+          Export Excel
+        </button>
+      </div>
+    </div>
+
+    <div class="filters">
+      <input type="search" id="searchInvoices" placeholder="Rechercher fournisseur, n° facture…">
+      <select id="histSupplier"><option value="">Tous fournisseurs</option></select>
+      <input type="month" id="histMonth">
+    </div>
+
+    <div class="table-wrap">
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Fournisseur</th>
+            <th>N° facture</th>
+            <th>Lignes</th>
+            <th>Total HT</th>
+            <th>Écarts</th>
+            <th>Statut</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="invoicesBody">
+          <tr class="empty-row"><td colspan="8">Aucune facture enregistrée.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============== ONGLET RÉGLAGES ============== -->
+  <section class="tab-panel" id="tab-settings">
+    <div class="page-header">
+      <div>
+        <h2>Réglages</h2>
+        <p class="muted">Connexion Firebase, seuils d'alerte, sauvegarde locale.</p>
+      </div>
+    </div>
+
+    <div class="settings-grid">
+      <div class="settings-card">
+        <h3>Connexion Firebase</h3>
+        <p class="muted">Configure la connexion au Realtime Database. Les données sont synchronisées automatiquement.</p>
+        <div class="field">
+          <label>API Key</label>
+          <input type="text" id="cfgApiKey" placeholder="AIza…">
+        </div>
+        <div class="field">
+          <label>Auth Domain</label>
+          <input type="text" id="cfgAuthDomain" placeholder="projet.firebaseapp.com">
+        </div>
+        <div class="field">
+          <label>Database URL</label>
+          <input type="text" id="cfgDbUrl" placeholder="https://projet-default-rtdb.europe-west1.firebasedatabase.app">
+        </div>
+        <div class="field">
+          <label>Project ID</label>
+          <input type="text" id="cfgProjectId" placeholder="projet-id">
+        </div>
+        <div class="field-row">
+          <button class="btn btn-primary" id="btnConnectFb">Connecter Firebase</button>
+          <button class="btn btn-ghost" id="btnDisconnectFb">Déconnecter</button>
+        </div>
+        <div class="muted small" id="fbInfo"></div>
+      </div>
+
+      <div class="settings-card">
+        <h3>Seuils d'alerte</h3>
+        <p class="muted">Tolérance par défaut, écrasée par celle d'un article s'il en a une.</p>
+        <div class="field">
+          <label>Seuil modéré (%) — orange à partir de</label>
+          <input type="number" step="0.1" id="cfgThreshWarn" value="2">
+        </div>
+        <div class="field">
+          <label>Seuil critique (%) — rouge à partir de</label>
+          <input type="number" step="0.1" id="cfgThreshDanger" value="5">
+        </div>
+        <button class="btn btn-primary" id="btnSaveThresh">Enregistrer les seuils</button>
+      </div>
+
+      <div class="settings-card">
+        <h3>Sauvegarde locale</h3>
+        <p class="muted">Export complet de toutes les données (articles, fournisseurs, factures) au format JSON.</p>
+        <div class="field-row">
+          <button class="btn btn-ghost" id="btnBackup">Télécharger sauvegarde</button>
+          <button class="btn btn-ghost" id="btnRestore">Restaurer depuis fichier</button>
+          <input type="file" id="restoreInput" accept=".json" hidden>
+        </div>
+        <div class="danger-zone">
+          <h4>Zone sensible</h4>
+          <button class="btn btn-danger" id="btnReset">Réinitialiser toutes les données</button>
+        </div>
+      </div>
+
+      <div class="settings-card">
+        <h3>À propos</h3>
+        <p class="muted">FactureCheck v1.0 — Sanit Climat SAS</p>
+        <p class="muted small">Application standalone, données stockées dans Firebase Realtime Database (région europe-west1) et en localStorage si aucune connexion configurée. PDF parsé via PDF.js, OCR via Tesseract.js, exports Excel via SheetJS.</p>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- TOAST -->
+<div class="toast" id="toast"></div>
+
+<!-- MODAL ARTICLE -->
+<div class="modal" id="articleModal" hidden>
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3 id="articleModalTitle">Nouvel article</h3>
+      <button class="icon-btn" data-close="articleModal">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="grid-2">
+        <div class="field">
+          <label>Code article</label>
+          <input type="text" id="aCode" placeholder="Ex : CED-12345">
+        </div>
+        <div class="field">
+          <label>Code fournisseur (optionnel)</label>
+          <input type="text" id="aSupplierCode">
+        </div>
+        <div class="field full">
+          <label>Désignation</label>
+          <input type="text" id="aDesignation" placeholder="Désignation complète…">
+        </div>
+        <div class="field">
+          <label>Fournisseur</label>
+          <input type="text" id="aSupplier" list="supplierList2">
+          <datalist id="supplierList2"></datalist>
+        </div>
+        <div class="field">
+          <label>Catégorie</label>
+          <select id="aCategory">
+            <option value="plomberie">Plomberie</option>
+            <option value="chaudiere">Chaudière</option>
+            <option value="vmc">VMC</option>
+            <option value="climatisation">Climatisation</option>
+            <option value="electricite">Électricité</option>
+            <option value="consommables">Consommables</option>
+            <option value="autre">Autre</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Unité</label>
+          <select id="aUnit">
+            <option>U</option><option>ML</option><option>M²</option><option>M³</option>
+            <option>KG</option><option>L</option><option>BOÎTE</option><option>LOT</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Prix de référence HT (€)</label>
+          <input type="number" step="0.0001" id="aPrice">
+        </div>
+        <div class="field">
+          <label>Tolérance % (vide = défaut)</label>
+          <input type="number" step="0.1" id="aTolerance" placeholder="2">
+        </div>
+        <div class="field full">
+          <label>Notes</label>
+          <textarea id="aNotes" rows="2"></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" data-close="articleModal">Annuler</button>
+      <button class="btn btn-danger" id="btnDeleteArticle" hidden>Supprimer</button>
+      <button class="btn btn-primary" id="btnSaveArticle">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL FOURNISSEUR -->
+<div class="modal" id="supplierModal" hidden>
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3 id="supplierModalTitle">Nouveau fournisseur</h3>
+      <button class="icon-btn" data-close="supplierModal">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="grid-2">
+        <div class="field full">
+          <label>Nom</label>
+          <input type="text" id="sName" placeholder="Ex : Cedeo Marseille">
+        </div>
+        <div class="field">
+          <label>Code interne</label>
+          <input type="text" id="sCode">
+        </div>
+        <div class="field">
+          <label>SIRET</label>
+          <input type="text" id="sSiret">
+        </div>
+        <div class="field full">
+          <label>Adresse</label>
+          <input type="text" id="sAddress">
+        </div>
+        <div class="field">
+          <label>Téléphone</label>
+          <input type="text" id="sPhone">
+        </div>
+        <div class="field">
+          <label>Email</label>
+          <input type="email" id="sEmail">
+        </div>
+        <div class="field">
+          <label>Délai de paiement (jours)</label>
+          <input type="number" id="sPayment" value="30">
+        </div>
+        <div class="field">
+          <label>Remise habituelle (%)</label>
+          <input type="number" step="0.1" id="sDiscount" value="0">
+        </div>
+        <div class="field full">
+          <label>Notes / conditions particulières</label>
+          <textarea id="sNotes" rows="2"></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" data-close="supplierModal">Annuler</button>
+      <button class="btn btn-danger" id="btnDeleteSupplier" hidden>Supprimer</button>
+      <button class="btn btn-primary" id="btnSaveSupplier">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL DÉTAIL FACTURE -->
+<div class="modal" id="invoiceModal" hidden>
+  <div class="modal-card modal-lg">
+    <div class="modal-head">
+      <h3 id="invoiceModalTitle">Facture</h3>
+      <button class="icon-btn" data-close="invoiceModal">×</button>
+    </div>
+    <div class="modal-body" id="invoiceModalBody"></div>
+    <div class="modal-foot">
+      <button class="btn btn-danger" id="btnDeleteInvoice">Supprimer</button>
+      <button class="btn btn-ghost" data-close="invoiceModal">Fermer</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL VALIDATION ARTICLES NOUVEAUX -->
+<div class="modal" id="validationModal" hidden>
+  <div class="modal-card modal-lg">
+    <div class="modal-head">
+      <h3>Articles non référencés détectés</h3>
+      <button class="icon-btn" data-close="validationModal">×</button>
+    </div>
+    <div class="modal-body">
+      <p class="muted">Ces articles n'existent pas encore dans la base. Coche ceux à créer comme références.</p>
+      <div id="validationList"></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" data-close="validationModal">Plus tard</button>
+      <button class="btn btn-primary" id="btnValidateNew">Créer les articles cochés</button>
+    </div>
+  </div>
+</div>
+
+<!-- MODAL PAIEMENT -->
+<div class="modal" id="paymentModal" hidden>
+  <div class="modal-card">
+    <div class="modal-head">
+      <h3 id="paymentModalTitle">Enregistrer un règlement</h3>
+      <button class="icon-btn" data-close="paymentModal">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="payment-summary" id="paymentSummary"></div>
+      <div class="grid-2">
+        <div class="field">
+          <label>Type</label>
+          <select id="payType">
+            <option value="payment">Paiement</option>
+            <option value="credit">Avoir / remboursement</option>
+            <option value="discount">Escompte / remise commerciale</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Date</label>
+          <input type="date" id="payDate">
+        </div>
+        <div class="field">
+          <label>Montant (€)</label>
+          <input type="number" step="0.01" id="payAmount">
+        </div>
+        <div class="field">
+          <label>Mode</label>
+          <select id="payMode">
+            <option value="virement">Virement</option>
+            <option value="prelevement">Prélèvement</option>
+            <option value="cheque">Chèque</option>
+            <option value="cb">Carte bancaire</option>
+            <option value="especes">Espèces</option>
+            <option value="lcr">LCR / Traite</option>
+            <option value="autre">Autre</option>
+          </select>
+        </div>
+        <div class="field full">
+          <label>Référence (n° de chèque, virement, etc.)</label>
+          <input type="text" id="payReference">
+        </div>
+        <div class="field full">
+          <label>Notes</label>
+          <textarea id="payNotes" rows="2"></textarea>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn btn-ghost" data-close="paymentModal">Annuler</button>
+      <button class="btn btn-primary" id="btnSavePayment">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- Firebase compat libs (chargées seulement si config) -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="app.js?v=20260428-pum2"></script>
+</body>
+</html>
