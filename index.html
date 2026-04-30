@@ -1348,7 +1348,7 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
 </head>
 <body>
 <div id="version-banner" style="background:#16a34a;color:white;padding:10px 16px;text-align:center;font-weight:bold;font-family:sans-serif;font-size:14px;position:relative;z-index:9999">
-  ✅ VERSION v15 — Filtrage éco-participation automatique
+  ✅ VERSION v18 — Tolérance 1,5% (orange) / 3% (rouge)
   <button onclick="this.parentElement.style.display='none'" style="position:absolute;right:10px;top:6px;background:transparent;border:0;color:white;font-size:18px;cursor:pointer">×</button>
 </div>
 
@@ -1962,13 +1962,17 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
         <p class="muted">Tolérance par défaut, écrasée par celle d'un article s'il en a une.</p>
         <div class="field">
           <label>Seuil modéré (%) — orange à partir de</label>
-          <input type="number" step="0.1" id="cfgThreshWarn" value="2">
+          <input type="number" step="0.1" id="cfgThreshWarn" value="1.5">
         </div>
         <div class="field">
           <label>Seuil critique (%) — rouge à partir de</label>
-          <input type="number" step="0.1" id="cfgThreshDanger" value="5">
+          <input type="number" step="0.1" id="cfgThreshDanger" value="3">
         </div>
         <button class="btn btn-primary" id="btnSaveThresh">Enregistrer les seuils</button>
+        <hr style="margin:16px 0;border:0;border-top:1px solid var(--line-soft)">
+        <p class="muted small">Recalculer les statuts de toutes les factures avec les seuils actuels (utile après changement de tolérance ou de tarifs).</p>
+        <button class="btn btn-ghost" id="btnRecalcEcarts">🔄 Recalculer tous les écarts</button>
+        <div class="muted small" id="recalcInfo" style="margin-top:8px"></div>
       </div>
 
       <div class="settings-card">
@@ -2229,9 +2233,9 @@ const STATE = {
   suppliers: {},     // { id: {name, code, siret, address, phone, email, payment, discount, notes} }
   invoices: {},      // { id: {supplier, number, date, total, lines:[], createdAt} }
   config: {
-    firebase: null,  // { apiKey, authDomain, databaseURL, projectId }
-    threshWarn: 2,
-    threshDanger: 5,
+    firebase: null,
+    threshWarn: 1.5,
+    threshDanger: 3,
   },
   fb: { app: null, db: null, connected: false },
   currentInvoice: null, // facture en cours d'extraction (avant save)
@@ -4253,8 +4257,70 @@ async function savePayment() {
   if (viewingInvoiceId === payingInvoiceId) openInvoiceModal(payingInvoiceId);
 }
 
-async function deletePayment(invoiceId, paymentId) {
-  if (!confirm('Supprimer ce règlement ?')) return;
+// ============================================================
+// RECALCUL DES ÉCARTS sur toutes les factures
+// ============================================================
+async function recalcAllEcarts() {
+  const total = Object.keys(STATE.invoices).length;
+  if (total === 0) {
+    toast('Aucune facture à recalculer', 'info');
+    return;
+  }
+  const tw = STATE.config.threshWarn || 1.5;
+  const td = STATE.config.threshDanger || 3;
+  if (!confirm(`Recalculer les écarts pour ${total} facture(s) avec les seuils actuels ?\n\n• Modéré (orange) : à partir de ${tw}%\n• Critique (rouge) : à partir de ${td}%\n\nLes statuts en litige ou validés manuellement ne seront pas modifiés.`)) {
+    return;
+  }
+
+  $('#recalcInfo').textContent = 'Recalcul en cours...';
+  let changedCount = 0;
+  let ok = 0, warn = 0, danger = 0, noref = 0;
+
+  // Yield UI au démarrage
+  await new Promise(r => setTimeout(r, 50));
+
+  let i = 0;
+  for (const id in STATE.invoices) {
+    const inv = STATE.invoices[id];
+    if (!inv) continue;
+
+    // Calculer nouvelles stats
+    const stats = invoiceStats(inv);
+    ok += stats.ok;
+    warn += stats.warn;
+    danger += stats.danger;
+    noref += stats.noref;
+
+    // Recalculer le statut auto si pas en litige ni manuellement validé
+    const oldStatus = inv.status;
+    if (inv.status !== 'dispute' && inv.status !== 'paid') {
+      // Logique : si écarts critiques → to_check, sinon validated/paid selon paiements
+      const hasIssues = stats.danger > 0 || stats.warn > 0;
+      const newStatus = hasIssues ? 'to_check' : autoStatus(inv);
+      if (newStatus !== oldStatus) {
+        inv.status = newStatus;
+        await fbWrite('invoices/' + id, inv);
+        changedCount++;
+      }
+    }
+
+    i++;
+    if (i % 50 === 0) {
+      $('#recalcInfo').textContent = `${i} / ${total} factures recalculées...`;
+      await new Promise(r => setTimeout(r, 0));  // yield
+    }
+  }
+
+  $('#recalcInfo').innerHTML = `
+    ✅ Recalcul terminé : <strong>${total}</strong> facture(s) analysées<br>
+    Écarts détectés : <span style="color:#2dd29b">${ok} OK</span> · <span style="color:#ffb547">${warn} modérés</span> · <span style="color:#ff5e6c">${danger} critiques</span> · <span style="color:#6e7c9b">${noref} non référencés</span><br>
+    ${changedCount > 0 ? `Statuts mis à jour : <strong>${changedCount}</strong>` : 'Aucun changement de statut'}
+  `;
+  toast(`Recalcul terminé · ${changedCount} statut(s) modifié(s)`, 'ok');
+  renderAll();
+}
+
+async function deletePayment(invoiceId, paymentId) {  if (!confirm('Supprimer ce règlement ?')) return;
   const inv = STATE.invoices[invoiceId];
   if (!inv || !inv.payments) return;
   inv.payments = inv.payments.filter(p => p.id !== paymentId);
@@ -4474,9 +4540,9 @@ function updateMultiPaymentBar() {
   const bar = $('#paymentMultiActionBar');
   const checked = $$('.pay-check:checked');
   if (!bar) return;
+  console.log('[multiPaymentBar] checked count:', checked.length);
   if (checked.length === 0) {
     bar.style.display = 'none';
-    // Décolorer les lignes
     $$('#paymentBody tr').forEach(tr => tr.classList.remove('row-selected'));
     return;
   }
@@ -4485,7 +4551,6 @@ function updateMultiPaymentBar() {
   $('#paymentSelectedCount').textContent = checked.length;
   $('#paymentSelectedTotal').textContent = fmtMoney(total);
 
-  // Colorer les lignes sélectionnées
   $$('#paymentBody tr').forEach(tr => tr.classList.remove('row-selected'));
   checked.forEach(cb => {
     const tr = cb.closest('tr');
@@ -6237,6 +6302,22 @@ function bindEvents() {
       updateMultiPaymentBar();
     });
   }
+  // Event delegation : robust face aux re-rendus du tbody
+  const paymentBodyEl = $('#paymentBody');
+  if (paymentBodyEl) {
+    paymentBodyEl.addEventListener('change', e => {
+      if (e.target.classList && e.target.classList.contains('pay-check')) {
+        updateMultiPaymentBar();
+      }
+    });
+    paymentBodyEl.addEventListener('click', e => {
+      // Si on clique sur la cellule contenant la checkbox, basculer la case
+      if (e.target.classList && e.target.classList.contains('pay-check')) {
+        // déjà géré par le change ci-dessus
+        return;
+      }
+    });
+  }
   if ($('#btnPayMultiple')) {
     $('#btnPayMultiple').addEventListener('click', openMultiPaymentModal);
   }
@@ -6323,10 +6404,13 @@ function bindEvents() {
   // Au démarrage, restaurer le handle silencieusement
   updateOneDriveInfo();
   $('#btnSaveThresh').addEventListener('click', () => {
-    STATE.config.threshWarn = parseFloat($('#cfgThreshWarn').value) || 2;
-    STATE.config.threshDanger = parseFloat($('#cfgThreshDanger').value) || 5;
+    STATE.config.threshWarn = parseFloat($('#cfgThreshWarn').value) || 1.5;
+    STATE.config.threshDanger = parseFloat($('#cfgThreshDanger').value) || 3;
     saveLocal(); toast('Seuils enregistrés', 'ok'); renderAll();
   });
+
+  // Recalcul de tous les écarts/statuts
+  $('#btnRecalcEcarts').addEventListener('click', recalcAllEcarts);
   $('#btnBackup').addEventListener('click', backupJson);
   $('#btnRestore').addEventListener('click', () => $('#restoreInput').click());
   $('#restoreInput').addEventListener('change', e => e.target.files[0] && restoreJson(e.target.files[0]));
