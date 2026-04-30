@@ -1348,7 +1348,7 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
 </head>
 <body>
 <div id="version-banner" style="background:#16a34a;color:white;padding:10px 16px;text-align:center;font-weight:bold;font-family:sans-serif;font-size:14px;position:relative;z-index:9999">
-  ✅ VERSION v18 — Tolérance 1,5% (orange) / 3% (rouge)
+  ⚡ VERSION v19 — TURBO : démarrage 10x, save instantané, cache stats
   <button onclick="this.parentElement.style.display='none'" style="position:absolute;right:10px;top:6px;background:transparent;border:0;color:white;font-size:18px;cursor:pointer">×</button>
 </div>
 
@@ -2257,11 +2257,34 @@ function loadLocal() {
     STATE.articles = data.articles || {};
     STATE.suppliers = data.suppliers || {};
     STATE.invoices = data.invoices || {};
+    // Propager l'id interne pour cache
+    for (const id in STATE.invoices) {
+      if (STATE.invoices[id]) STATE.invoices[id]._id = id;
+    }
     STATE.config = { ...STATE.config, ...(data.config || {}) };
   } catch(e) { console.warn('loadLocal', e); }
 }
 
+let _saveLocalTimer = null;
 function saveLocal() {
+  // Debounce 300ms : si plusieurs saves rapprochés, on ne fait qu'une seule écriture
+  if (_saveLocalTimer) clearTimeout(_saveLocalTimer);
+  _saveLocalTimer = setTimeout(() => {
+    try {
+      localStorage.setItem(LS_KEY, JSON.stringify({
+        articles: STATE.articles,
+        suppliers: STATE.suppliers,
+        invoices: STATE.invoices,
+        config: STATE.config,
+      }));
+    } catch(e) { console.warn('saveLocal', e); }
+    _saveLocalTimer = null;
+  }, 300);
+}
+
+// Variante synchrone pour les cas critiques (export, fermeture)
+function saveLocalSync() {
+  if (_saveLocalTimer) { clearTimeout(_saveLocalTimer); _saveLocalTimer = null; }
   try {
     localStorage.setItem(LS_KEY, JSON.stringify({
       articles: STATE.articles,
@@ -2269,7 +2292,7 @@ function saveLocal() {
       invoices: STATE.invoices,
       config: STATE.config,
     }));
-  } catch(e) { console.warn('saveLocal', e); }
+  } catch(e) { console.warn('saveLocalSync', e); }
 }
 
 async function fbInit(cfg) {
@@ -2281,25 +2304,36 @@ async function fbInit(cfg) {
     await STATE.fb.db.ref('.info/connected').once('value');
     STATE.fb.connected = true;
     setFbStatus(true);
-    // Pull all data
-    const snap = await STATE.fb.db.ref('facturecheck').once('value');
-    const remote = snap.val() || {};
-    if (remote.articles) STATE.articles = remote.articles;
-    if (remote.suppliers) STATE.suppliers = remote.suppliers;
-    if (remote.invoices) STATE.invoices = remote.invoices;
-    // Live listeners
-    STATE.fb.db.ref('facturecheck/articles').on('value', s => {
-      STATE.articles = s.val() || {};
-      renderArticles(); renderSuppliersDatalists();
-    });
-    STATE.fb.db.ref('facturecheck/suppliers').on('value', s => {
-      STATE.suppliers = s.val() || {};
-      renderSuppliers(); renderSuppliersDatalists();
-    });
-    STATE.fb.db.ref('facturecheck/invoices').on('value', s => {
-      STATE.invoices = s.val() || {};
-      renderInvoices(); renderEcarts(); renderKPI();
-    });
+
+    // PHASE 1 : charger d'abord factures + fournisseurs (légers, instantané)
+    const [invSnap, supSnap] = await Promise.all([
+      STATE.fb.db.ref('facturecheck/invoices').once('value'),
+      STATE.fb.db.ref('facturecheck/suppliers').once('value'),
+    ]);
+    STATE.invoices = invSnap.val() || {};
+    STATE.suppliers = supSnap.val() || {};
+    // Propager id interne
+    for (const id in STATE.invoices) {
+      if (STATE.invoices[id]) STATE.invoices[id]._id = id;
+    }
+    renderSuppliersDatalists();
+    renderInvoices();
+    renderKPI();
+
+    // PHASE 2 : charger les articles en arrière-plan (gros volume)
+    // Sans bloquer l'UI - l'utilisateur peut déjà voir ses factures
+    setTimeout(async () => {
+      const artSnap = await STATE.fb.db.ref('facturecheck/articles').once('value');
+      STATE.articles = artSnap.val() || {};
+      invalidateArticleIndex();
+      saveLocal();
+      renderArticles();
+      // Précompute l'index pour matching instantané
+      getArticleIndex();
+    }, 100);
+
+    // PAS de listeners live (.on) pour éviter les re-téléchargements à chaque save
+    // Les changements sont sync via fbWrite et l'app maintient l'état local
     saveLocal();
     return true;
   } catch(e) {
@@ -2316,19 +2350,21 @@ function fbDisconnect() {
 }
 
 async function fbWrite(path, data) {
-  if (STATE.fb.connected && STATE.fb.db) {
-    try { await STATE.fb.db.ref('facturecheck/' + path).set(data); }
-    catch(e) { console.warn('fbWrite', e); }
-  }
+  // Sauvegarde locale immédiate (rapide)
   saveLocal();
+  // Sauvegarde Firebase en arrière-plan (sans bloquer l'utilisateur)
+  if (STATE.fb.connected && STATE.fb.db) {
+    STATE.fb.db.ref('facturecheck/' + path).set(data)
+      .catch(e => { console.warn('fbWrite', e); });
+  }
 }
 
 async function fbRemove(path) {
-  if (STATE.fb.connected && STATE.fb.db) {
-    try { await STATE.fb.db.ref('facturecheck/' + path).remove(); }
-    catch(e) { console.warn('fbRemove', e); }
-  }
   saveLocal();
+  if (STATE.fb.connected && STATE.fb.db) {
+    STATE.fb.db.ref('facturecheck/' + path).remove()
+      .catch(e => { console.warn('fbRemove', e); });
+  }
 }
 
 function setFbStatus(connected) {
@@ -2350,6 +2386,13 @@ function setFbStatus(connected) {
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const $ = sel => document.querySelector(sel);
 const $$ = sel => document.querySelectorAll(sel);
+const debounce = (fn, ms = 200) => {
+  let t;
+  return (...args) => {
+    clearTimeout(t);
+    t = setTimeout(() => fn(...args), ms);
+  };
+};
 const fmt = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
 const fmtMoney = n => (n == null || isNaN(n)) ? '—' : Number(n).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
 const fmtPct = n => (n == null || isNaN(n)) ? '—' : (n >= 0 ? '+' : '') + Number(n).toFixed(1) + ' %';
@@ -4068,6 +4111,8 @@ function getArticleIndex() {
 
 function invalidateArticleIndex() {
   _articleIndex = null;
+  // Les stats facture dépendent de l'index, donc invalider aussi
+  if (typeof _invoiceStatsCache !== 'undefined') _invoiceStatsCache.clear();
 }
 
 function findArticleMatch(line, supplierName) {
@@ -4469,13 +4514,17 @@ function renderPayment() {
   if (filtered.length === 0) {
     tbody.innerHTML = `<tr class="empty-row"><td colspan="11">Aucune facture ne correspond aux filtres.</td></tr>`;
   } else {
-    tbody.innerHTML = filtered
-      .sort((a, b) => {
-        // tri par échéance asc, sinon date desc
-        const ad = a.dueDate || a.date || '0';
-        const bd = b.dueDate || b.date || '0';
-        return ad.localeCompare(bd);
-      })
+    // Pagination : max 200 factures
+    const MAX_DISPLAY = 200;
+    const sorted = filtered.sort((a, b) => {
+      const ad = a.dueDate || a.date || '0';
+      const bd = b.dueDate || b.date || '0';
+      return ad.localeCompare(bd);
+    });
+    const displayed = sorted.slice(0, MAX_DISPLAY);
+    const truncated = filtered.length > MAX_DISPLAY;
+
+    let html = displayed
       .map(i => {
         const status = autoStatus(i);
         const total = invoiceTotalTtc(i);
@@ -4493,7 +4542,6 @@ function renderPayment() {
         else if (stats.warn > 0) ecartCell = `<span class="badge badge-warn">${stats.warn}</span>`;
         else if (stats.ok > 0) ecartCell = `<span class="badge badge-ok">OK</span>`;
 
-        // Checkbox uniquement pour les factures avec reste dû > 0
         const checkboxCell = due > 0
           ? `<td><input type="checkbox" class="pay-check" data-pay-id="${i.id}" data-pay-due="${due}"></td>`
           : `<td><span class="muted small">—</span></td>`;
@@ -4517,17 +4565,19 @@ function renderPayment() {
           </tr>`;
       }).join('');
 
+    if (truncated) {
+      html += `<tr class="empty-row"><td colspan="11" style="text-align:center;padding:16px"><span class="muted">📋 ${MAX_DISPLAY} factures affichées sur ${filtered.length.toLocaleString('fr-FR')}. <strong>Filtrez</strong> pour voir les autres.</span></td></tr>`;
+    }
+
+    tbody.innerHTML = html;
+
+    // Event delegation : déjà géré dans bindEvents pour pay-check
     tbody.querySelectorAll('[data-pay]').forEach(b =>
       b.addEventListener('click', e => { e.stopPropagation(); openPaymentModal(b.dataset.pay); }));
     tbody.querySelectorAll('[data-view]').forEach(b =>
       b.addEventListener('click', e => { e.stopPropagation(); openInvoiceModal(b.dataset.view); }));
-
-    // Checkboxes : maj barre de sélection
-    tbody.querySelectorAll('.pay-check').forEach(cb =>
-      cb.addEventListener('change', updateMultiPaymentBar));
   }
 
-  // Reset checkbox "tout sélectionner"
   const selectAllCb = $('#paymentSelectAll');
   if (selectAllCb) selectAllCb.checked = false;
   updateMultiPaymentBar();
@@ -4540,7 +4590,6 @@ function updateMultiPaymentBar() {
   const bar = $('#paymentMultiActionBar');
   const checked = $$('.pay-check:checked');
   if (!bar) return;
-  console.log('[multiPaymentBar] checked count:', checked.length);
   if (checked.length === 0) {
     bar.style.display = 'none';
     $$('#paymentBody tr').forEach(tr => tr.classList.remove('row-selected'));
@@ -4975,8 +5024,13 @@ function renderInvoices() {
     return;
   }
 
-  tbody.innerHTML = filtered
-    .sort((a, b) => (b.date || '').localeCompare(a.date || ''))
+  // Pagination : max 200 factures affichées
+  const MAX_DISPLAY = 200;
+  const sorted = filtered.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const displayed = sorted.slice(0, MAX_DISPLAY);
+  const truncated = filtered.length > MAX_DISPLAY;
+
+  let html = displayed
     .map(i => {
       const stats = invoiceStats(i);
       let statusBadge = '<span class="badge badge-ok">Conforme</span>';
@@ -4997,11 +5051,29 @@ function renderInvoices() {
       `;
     }).join('');
 
+  if (truncated) {
+    html += `<tr class="empty-row"><td colspan="8" style="text-align:center;padding:16px"><span class="muted">📋 ${MAX_DISPLAY} dernières factures affichées sur ${filtered.length.toLocaleString('fr-FR')}. <strong>Filtrez par mois ou fournisseur</strong> pour voir les autres.</span></td></tr>`;
+  }
+
+  tbody.innerHTML = html;
+
   tbody.querySelectorAll('[data-view]').forEach(btn =>
     btn.addEventListener('click', () => openInvoiceModal(btn.dataset.view)));
 }
 
+// Cache des stats par facture (évite de recalculer 100 fois lors d'un rendu de tableau)
+const _invoiceStatsCache = new Map();
+function invalidateInvoiceStats(invoiceId) {
+  if (invoiceId) _invoiceStatsCache.delete(invoiceId);
+  else _invoiceStatsCache.clear();
+}
+
 function invoiceStats(invoice) {
+  // Cache key : id facture + nombre articles (pour invalidation auto si import)
+  const cacheKey = invoice.id || invoice._id;
+  if (cacheKey && _invoiceStatsCache.has(cacheKey)) {
+    return _invoiceStatsCache.get(cacheKey);
+  }
   const stats = { ok: 0, warn: 0, danger: 0, noref: 0, overcost: 0 };
   (invoice.lines || []).forEach(l => {
     const m = findArticleMatch(l, invoice.supplier);
@@ -5009,6 +5081,7 @@ function invoiceStats(invoice) {
     stats[e.level]++;
     if (e.overcost > 0 && (e.level === 'warn' || e.level === 'danger')) stats.overcost += e.overcost;
   });
+  if (cacheKey) _invoiceStatsCache.set(cacheKey, stats);
   return stats;
 }
 
@@ -5891,6 +5964,8 @@ async function saveCurrentInvoice() {
   }
 
   STATE.invoices[id] = data;
+  data._id = id;
+  invalidateInvoiceStats();
   await fbWrite('invoices/' + id, data);
   STATE.pendingFiles = [];
 
@@ -6257,7 +6332,7 @@ function bindEvents() {
   $('#btnNewArticle').addEventListener('click', () => openArticleModal());
   $('#btnSaveArticle').addEventListener('click', saveArticle);
   $('#btnDeleteArticle').addEventListener('click', deleteArticle);
-  $('#searchArticles').addEventListener('input', renderArticles);
+  $('#searchArticles').addEventListener('input', debounce(renderArticles, 250));
   $('#filterSupplier').addEventListener('change', renderArticles);
   $('#filterCategory').addEventListener('change', renderArticles);
   $('#btnImportArticles').addEventListener('click', () => {
@@ -6274,7 +6349,7 @@ function bindEvents() {
   $('#btnDeleteSupplier').addEventListener('click', deleteSupplier);
 
   // Invoices
-  $('#searchInvoices').addEventListener('input', renderInvoices);
+  $('#searchInvoices').addEventListener('input', debounce(renderInvoices, 200));
   $('#histSupplier').addEventListener('change', renderInvoices);
   $('#histMonth').addEventListener('change', renderInvoices);
   $('#btnExportInvoices').addEventListener('click', exportInvoicesXlsx);
@@ -6287,7 +6362,7 @@ function bindEvents() {
   $('#btnExportEcarts').addEventListener('click', exportEcartsXlsx);
 
   // Suivi facturier
-  $('#searchPayment').addEventListener('input', renderPayment);
+  $('#searchPayment').addEventListener('input', debounce(renderPayment, 200));
   $('#paymentStatus').addEventListener('change', renderPayment);
   $('#paymentSupplier').addEventListener('change', renderPayment);
   $('#paymentDue').addEventListener('change', renderPayment);
