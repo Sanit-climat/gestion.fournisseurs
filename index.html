@@ -1254,6 +1254,40 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
   margin-right: 4px;
 }
 
+/* Cellule RÉF. BASE avec actions */
+.ref-cell {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ref-cell .ref-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.ref-cell .btn-icon {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text-soft);
+  padding: 2px 6px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  min-width: 24px;
+}
+.ref-cell .btn-icon:hover {
+  background: var(--bg-3);
+  color: var(--text);
+  border-color: var(--accent);
+}
+.ref-cell .btn-icon[data-detach]:hover {
+  background: rgba(255, 94, 108, 0.15);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
 .multi-pay-item {
   display: flex;
   justify-content: space-between;
@@ -1361,7 +1395,7 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
 </head>
 <body>
 <div id="version-banner" style="background:#16a34a;color:white;padding:10px 16px;text-align:center;font-weight:bold;font-family:sans-serif;font-size:14px;position:relative;z-index:9999">
-  ✅ VERSION v22 — Outillage en jaune post-it
+  ✅ VERSION v23 — Détacher / Réattribuer manuellement les références
   <button onclick="this.parentElement.style.display='none'" style="position:absolute;right:10px;top:6px;background:transparent;border:0;color:white;font-size:18px;cursor:pointer">×</button>
 </div>
 
@@ -2196,6 +2230,35 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
 </div>
 
 <!-- MODAL PAIEMENT -->
+<div class="modal" id="articleSearchModal" hidden>
+  <div class="modal-content" style="max-width:900px">
+    <div class="modal-head">
+      <h3>🔍 Rechercher une référence dans la base</h3>
+      <button class="icon-btn" data-close="articleSearchModal">×</button>
+    </div>
+    <div class="modal-body">
+      <div class="muted small" style="margin-bottom:8px">Fournisseur prioritaire : <strong id="articleSearchSupplier">—</strong></div>
+      <input type="search" id="articleSearchInput" placeholder="Tape le code ou la désignation de l'article…" style="width:100%;margin-bottom:12px;padding:10px;font-size:14px">
+      <div class="table-wrap" style="max-height:50vh;overflow-y:auto">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Code</th>
+              <th>Désignation</th>
+              <th>Fournisseur</th>
+              <th>Prix HT</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="articleSearchResults">
+            <tr><td colspan="5" class="muted" style="padding:16px;text-align:center">Tapez au moins 2 caractères pour chercher…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="paymentModal" hidden>
   <div class="modal-card">
     <div class="modal-head">
@@ -5892,13 +5955,48 @@ function renderCurrentLines() {
   }
 
   body.innerHTML = inv.lines.map((l, i) => {
-    const m = findArticleMatch(l, inv.supplier || $('#invSupplier').value);
+    // Si la ligne a un matchOverride, on l'utilise au lieu de chercher
+    let m = null;
+    if (l.matchOverride === 'none') {
+      // L'utilisateur a explicitement détaché : pas de match
+      m = null;
+    } else if (l.matchOverride) {
+      // Match forcé manuellement (id article)
+      const article = STATE.articles[l.matchOverride];
+      if (article) m = { article, id: l.matchOverride, score: 1.0 };
+    } else {
+      // Match auto par défaut
+      m = findArticleMatch(l, inv.supplier || $('#invSupplier').value);
+    }
+
     const e = computeEcart(l, m ? m.article : null);
     let ecartCell = '<span class="muted">—</span>';
     if (e.level === 'ok') ecartCell = `<span class="badge badge-ok">OK ${fmtPct(e.pct)}</span>`;
     else if (e.level === 'warn') ecartCell = `<span class="badge badge-warn">${fmtPct(e.pct)}</span>`;
     else if (e.level === 'danger') ecartCell = `<span class="badge badge-danger">${fmtPct(e.pct)}</span>`;
     else ecartCell = '<span class="badge badge-muted">non réf.</span>';
+
+    // Cellule RÉF. BASE avec actions
+    let refCell;
+    if (m) {
+      refCell = `
+        <div class="ref-cell">
+          <span class="muted small">${escapeHtml(m.article.code || '')}<br>${fmtMoney(m.article.price)}</span>
+          <div class="ref-actions">
+            <button class="btn-icon" data-detach="${i}" title="Détacher cette référence (mauvais match)">✕</button>
+            <button class="btn-icon" data-search="${i}" title="Chercher une autre référence">🔍</button>
+          </div>
+        </div>`;
+    } else {
+      refCell = `
+        <div class="ref-cell">
+          <span class="muted small">— ${l.matchOverride === 'none' ? '(détachée)' : ''}</span>
+          <div class="ref-actions">
+            <button class="btn-icon" data-search="${i}" title="Attribuer une référence">🔍</button>
+            ${l.matchOverride === 'none' ? `<button class="btn-icon" data-restore="${i}" title="Réactiver le match auto">↻</button>` : ''}
+          </div>
+        </div>`;
+    }
 
     return `
       <tr class="row-${e.level}" data-idx="${i}">
@@ -5908,7 +6006,7 @@ function renderCurrentLines() {
         <td><input type="text" data-f="unit" value="${escapeAttr(l.unit || 'U')}" style="width:50px"></td>
         <td><input type="number" step="0.0001" class="numeric" data-f="pu" value="${l.pu ?? ''}"></td>
         <td class="numeric">${l.qty && l.pu ? fmtMoney(l.qty * l.pu) : '—'}</td>
-        <td>${m ? `<span class="muted small">${escapeHtml(m.article.code || '')} · ${fmtMoney(m.article.price)}</span>` : '<span class="muted small">—</span>'}</td>
+        <td>${refCell}</td>
         <td>${ecartCell}</td>
         <td><button class="btn-mini" data-del="${i}">×</button></td>
       </tr>
@@ -5924,13 +6022,127 @@ function renderCurrentLines() {
       let val = e.target.value;
       if (field === 'qty' || field === 'pu') val = parseFrNumber(val);
       STATE.currentInvoice.lines[idx][field] = val;
+      // Si on change le code, on retire l'override pour relancer le match auto
+      if (field === 'code' || field === 'designation') {
+        delete STATE.currentInvoice.lines[idx].matchOverride;
+      }
       renderCurrentLines();
     });
   });
+
+  // Suppression de ligne
   body.querySelectorAll('[data-del]').forEach(btn =>
     btn.addEventListener('click', () => {
       STATE.currentInvoice.lines.splice(parseInt(btn.dataset.del), 1);
       renderCurrentLines();
+    }));
+
+  // Détacher la référence (mauvais match auto)
+  body.querySelectorAll('[data-detach]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.detach);
+      STATE.currentInvoice.lines[idx].matchOverride = 'none';
+      toast('Référence détachée', 'info');
+      renderCurrentLines();
+    }));
+
+  // Réactiver le match auto
+  body.querySelectorAll('[data-restore]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const idx = parseInt(btn.dataset.restore);
+      delete STATE.currentInvoice.lines[idx].matchOverride;
+      toast('Match auto réactivé', 'info');
+      renderCurrentLines();
+    }));
+
+  // Recherche manuelle d'une référence
+  body.querySelectorAll('[data-search]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      openArticleSearchModal(parseInt(btn.dataset.search));
+    }));
+}
+
+// ============================================================
+// MODAL DE RECHERCHE MANUELLE D'ARTICLE pour réattribution
+// ============================================================
+let _searchLineIdx = -1;
+function openArticleSearchModal(lineIdx) {
+  _searchLineIdx = lineIdx;
+  const line = STATE.currentInvoice.lines[lineIdx];
+  const supplier = $('#invSupplier').value.trim();
+  const modal = $('#articleSearchModal');
+  if (!modal) return;
+
+  // Pré-remplir le champ de recherche avec le code ou la désignation
+  const initialQuery = line.code || (line.designation || '').slice(0, 30);
+  $('#articleSearchInput').value = initialQuery;
+  $('#articleSearchSupplier').textContent = supplier || 'tous fournisseurs';
+
+  performArticleSearch(initialQuery, supplier);
+  modal.hidden = false;
+  setTimeout(() => $('#articleSearchInput').focus(), 50);
+}
+
+function performArticleSearch(query, supplierName) {
+  const tbody = $('#articleSearchResults');
+  if (!tbody) return;
+  const q = normalize(query || '');
+  if (q.length < 2) {
+    tbody.innerHTML = `<tr><td colspan="5" class="muted" style="padding:16px;text-align:center">Tapez au moins 2 caractères pour chercher…</td></tr>`;
+    return;
+  }
+  const supKey = supplierName ? normalize(supplierName) : null;
+  const tokens = q.split(/\s+/).filter(t => t.length > 1);
+  const results = [];
+  const all = Object.entries(STATE.articles);
+
+  for (const [id, a] of all) {
+    if (!a) continue;
+    // Filtrer par fournisseur si défini (mais montrer aussi les autres en bas)
+    const haystack = normalize([a.code, a.supplierCode, a.designation].join(' '));
+    let score = 0;
+    // Match exact code
+    if (a.code && normalize(a.code) === q) score += 100;
+    if (a.supplierCode && normalize(a.supplierCode) === q) score += 100;
+    // Match partiel par tokens
+    for (const t of tokens) {
+      if (haystack.includes(t)) score += 1;
+    }
+    if (score > 0) {
+      // Bonus si même fournisseur
+      if (supKey && a.supplier && normalize(a.supplier) === supKey) score += 10;
+      results.push({ id, article: a, score });
+    }
+  }
+
+  results.sort((a, b) => b.score - a.score);
+  const top = results.slice(0, 50);
+
+  if (top.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="5" class="muted" style="padding:16px;text-align:center">Aucun article trouvé. Élargis ta recherche.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = top.map(({ id, article }) => `
+    <tr>
+      <td><strong>${escapeHtml(article.code || '—')}</strong>${article.supplierCode ? `<br><span class="muted small">${escapeHtml(article.supplierCode)}</span>` : ''}</td>
+      <td>${escapeHtml(article.designation || '—')}</td>
+      <td>${escapeHtml(article.supplier || '—')}</td>
+      <td class="numeric"><strong>${fmtMoney(article.price)}</strong></td>
+      <td><button class="btn btn-primary btn-mini" data-pick="${id}">Choisir</button></td>
+    </tr>
+  `).join('');
+
+  tbody.querySelectorAll('[data-pick]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const articleId = btn.dataset.pick;
+      if (_searchLineIdx >= 0 && STATE.currentInvoice.lines[_searchLineIdx]) {
+        STATE.currentInvoice.lines[_searchLineIdx].matchOverride = articleId;
+        toast('Référence attribuée', 'ok');
+        $('#articleSearchModal').hidden = true;
+        _searchLineIdx = -1;
+        renderCurrentLines();
+      }
     }));
 }
 
@@ -6635,6 +6847,15 @@ function bindEvents() {
   $('#btnRestore').addEventListener('click', () => $('#restoreInput').click());
   $('#restoreInput').addEventListener('change', e => e.target.files[0] && restoreJson(e.target.files[0]));
   $('#btnReset').addEventListener('click', resetAll);
+
+  // Recherche article modale (réattribution manuelle)
+  if ($('#articleSearchInput')) {
+    $('#articleSearchInput').addEventListener('input', debounce(() => {
+      const q = $('#articleSearchInput').value;
+      const sup = $('#invSupplier') ? $('#invSupplier').value.trim() : null;
+      performArticleSearch(q, sup);
+    }, 200));
+  }
 
   // Click outside modal
   $$('.modal').forEach(m =>
