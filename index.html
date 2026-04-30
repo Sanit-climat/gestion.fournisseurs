@@ -1241,6 +1241,19 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
   background: rgba(255, 122, 26, 0.08);
 }
 
+/* Lignes outillage généraliste — fond jaune post-it pour les distinguer */
+.data-table tr.row-tooling {
+  background: rgba(250, 204, 21, 0.12);
+  border-left: 3px solid rgba(250, 204, 21, 0.7);
+}
+.data-table tr.row-tooling:hover {
+  background: rgba(250, 204, 21, 0.22);
+}
+.data-table tr.row-tooling td:first-child::before {
+  content: "🔧 ";
+  margin-right: 4px;
+}
+
 .multi-pay-item {
   display: flex;
   justify-content: space-between;
@@ -1348,7 +1361,7 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
 </head>
 <body>
 <div id="version-banner" style="background:#16a34a;color:white;padding:10px 16px;text-align:center;font-weight:bold;font-family:sans-serif;font-size:14px;position:relative;z-index:9999">
-  ⚡ VERSION v19 — TURBO : démarrage 10x, save instantané, cache stats
+  ✅ VERSION v22 — Outillage en jaune post-it
   <button onclick="this.parentElement.style.display='none'" style="position:absolute;right:10px;top:6px;background:transparent;border:0;color:white;font-size:18px;cursor:pointer">×</button>
 </div>
 
@@ -1580,6 +1593,11 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
         <option value="electricite">Électricité</option>
         <option value="consommables">Consommables</option>
         <option value="autre">Autre</option>
+      </select>
+      <select id="filterTooling" title="Filtrer par type">
+        <option value="">🔧 Tous types</option>
+        <option value="tooling">🔧 Outillage uniquement</option>
+        <option value="non-tooling">📦 Tout sauf outillage</option>
       </select>
       <span class="count-pill" id="articlesCount">0 articles</span>
     </div>
@@ -1973,6 +1991,26 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
         <p class="muted small">Recalculer les statuts de toutes les factures avec les seuils actuels (utile après changement de tolérance ou de tarifs).</p>
         <button class="btn btn-ghost" id="btnRecalcEcarts">🔄 Recalculer tous les écarts</button>
         <div class="muted small" id="recalcInfo" style="margin-top:8px"></div>
+      </div>
+
+      <div class="settings-card">
+        <h3>📋 Tolérance des articles en masse</h3>
+        <p class="muted">Modifier la tolérance individuelle de plusieurs articles d'un coup (utile pour aligner toute la base sur une même valeur).</p>
+        <div class="field">
+          <label>Nouvelle tolérance (%)</label>
+          <input type="number" step="0.1" id="bulkTolValue" value="1.5">
+        </div>
+        <div class="field">
+          <label>Appliquer à</label>
+          <select id="bulkTolSupplier">
+            <option value="">Tous les fournisseurs (35 903 articles)</option>
+          </select>
+        </div>
+        <div class="field-row">
+          <button class="btn btn-primary" id="btnApplyBulkTol">Appliquer la tolérance</button>
+          <button class="btn btn-ghost" id="btnResetBulkTol">Remettre la tolérance par défaut (vide)</button>
+        </div>
+        <div class="muted small" id="bulkTolInfo" style="margin-top:8px"></div>
       </div>
 
       <div class="settings-card">
@@ -4303,8 +4341,68 @@ async function savePayment() {
 }
 
 // ============================================================
-// RECALCUL DES ÉCARTS sur toutes les factures
+// MODIFICATION EN MASSE DE LA TOLÉRANCE DES ARTICLES
 // ============================================================
+async function bulkUpdateTolerance(value, supplierFilter) {
+  const all = Object.entries(STATE.articles);
+  const filtered = supplierFilter
+    ? all.filter(([id, a]) => a.supplier === supplierFilter)
+    : all;
+
+  if (filtered.length === 0) {
+    toast('Aucun article à mettre à jour', 'info');
+    return;
+  }
+
+  const valueDisplay = value === null ? 'défaut (vide)' : value + '%';
+  const supDisplay = supplierFilter || 'TOUS les fournisseurs';
+  if (!confirm(`Modifier la tolérance à ${valueDisplay} sur ${filtered.length.toLocaleString('fr-FR')} article(s) (${supDisplay}) ?\n\nCette opération peut prendre 30-60 secondes.`)) {
+    return;
+  }
+
+  const info = $('#bulkTolInfo');
+  info.innerHTML = `Mise à jour en cours... 0 / ${filtered.length}`;
+
+  const batch = {};
+  let count = 0;
+  const startTime = Date.now();
+
+  for (let i = 0; i < filtered.length; i++) {
+    const [id, a] = filtered[i];
+    a.tolerance = value;
+    a.updatedAt = Date.now();
+    STATE.articles[id] = a;
+    batch[id] = a;
+    count++;
+    if (i % 500 === 0) {
+      info.innerHTML = `Mise à jour en cours... ${count.toLocaleString('fr-FR')} / ${filtered.length.toLocaleString('fr-FR')}`;
+      await new Promise(r => setTimeout(r, 0));
+    }
+  }
+
+  // Sauvegarde locale
+  info.innerHTML = `Sauvegarde locale...`;
+  invalidateArticleIndex();
+  saveLocalSync();
+
+  // Sauvegarde Firebase en UN seul update batch
+  if (STATE.fb && STATE.fb.connected) {
+    info.innerHTML = `Envoi Firebase (peut prendre 30-60s)...`;
+    try {
+      await STATE.fb.db.ref('facturecheck/articles').update(batch);
+    } catch (err) {
+      console.error('Erreur Firebase:', err);
+      toast('Articles sauvés localement. Erreur Firebase : ' + err.message, 'warn');
+    }
+  }
+
+  const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+  info.innerHTML = `✅ Terminé : <strong>${count.toLocaleString('fr-FR')} article(s)</strong> mis à jour en ${duration}s`;
+  toast(`${count.toLocaleString('fr-FR')} articles mis à jour`, 'ok');
+  renderArticles();
+}
+
+
 async function recalcAllEcarts() {
   const total = Object.keys(STATE.invoices).length;
   if (total === 0) {
@@ -4904,11 +5002,17 @@ function renderArticles() {
   const search = normalize($('#searchArticles').value);
   const filterSup = $('#filterSupplier').value;
   const filterCat = $('#filterCategory').value;
+  const filterTooling = $('#filterTooling') ? $('#filterTooling').value : '';
 
   const items = Object.entries(STATE.articles).map(([id, a]) => ({ id, ...a }));
   const filtered = items.filter(a => {
     if (filterSup && a.supplier !== filterSup) return false;
     if (filterCat && a.category !== filterCat) return false;
+    if (filterTooling) {
+      const isTool = (a.category || '').toLowerCase().trim() === 'outillage generaliste';
+      if (filterTooling === 'tooling' && !isTool) return false;
+      if (filterTooling === 'non-tooling' && isTool) return false;
+    }
     if (search) {
       const hay = normalize([a.code, a.designation, a.supplier, a.supplierCode].join(' '));
       if (!hay.includes(search)) return false;
@@ -4930,8 +5034,11 @@ function renderArticles() {
   const truncated = filtered.length > MAX_DISPLAY;
 
   let html = displayed
-    .map(a => `
-      <tr data-id="${a.id}">
+    .map(a => {
+      const isTooling = (a.category || '').toLowerCase().trim() === 'outillage generaliste';
+      const rowClass = isTooling ? 'row-tooling' : '';
+      return `
+      <tr class="${rowClass}" data-id="${a.id}">
         <td><strong>${escapeHtml(a.code || '—')}</strong>${a.supplierCode ? `<br><span class="muted small">${escapeHtml(a.supplierCode)}</span>` : ''}</td>
         <td>${escapeHtml(a.designation || '—')}</td>
         <td>${escapeHtml(a.supplier || '—')}</td>
@@ -4942,7 +5049,8 @@ function renderArticles() {
         <td class="numeric">${a.tolerance != null && a.tolerance !== '' ? a.tolerance + ' %' : '<span class="muted">défaut</span>'}</td>
         <td><button class="btn-mini" data-edit="${a.id}">Modifier</button></td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
 
   if (truncated) {
     html += `<tr class="empty-row"><td colspan="9" style="text-align:center;padding:16px"><span class="muted">📋 Affichage limité à <strong>${MAX_DISPLAY} articles</strong> sur ${filtered.length.toLocaleString('fr-FR')} au total. <strong>Utilisez la recherche ou les filtres</strong> pour affiner.</span></td></tr>`;
@@ -6335,6 +6443,9 @@ function bindEvents() {
   $('#searchArticles').addEventListener('input', debounce(renderArticles, 250));
   $('#filterSupplier').addEventListener('change', renderArticles);
   $('#filterCategory').addEventListener('change', renderArticles);
+  if ($('#filterTooling')) {
+    $('#filterTooling').addEventListener('change', renderArticles);
+  }
   $('#btnImportArticles').addEventListener('click', () => {
     const inp = document.createElement('input');
     inp.type = 'file'; inp.accept = '.xlsx,.xls,.csv';
@@ -6486,6 +6597,40 @@ function bindEvents() {
 
   // Recalcul de tous les écarts/statuts
   $('#btnRecalcEcarts').addEventListener('click', recalcAllEcarts);
+
+  // Modification tolérance en masse
+  if ($('#btnApplyBulkTol')) {
+    $('#btnApplyBulkTol').addEventListener('click', () => {
+      const value = parseFrNumber($('#bulkTolValue').value);
+      if (isNaN(value) || value < 0) { toast('Valeur invalide', 'warn'); return; }
+      const supplier = $('#bulkTolSupplier').value || null;
+      bulkUpdateTolerance(value, supplier);
+    });
+  }
+  if ($('#btnResetBulkTol')) {
+    $('#btnResetBulkTol').addEventListener('click', () => {
+      const supplier = $('#bulkTolSupplier').value || null;
+      bulkUpdateTolerance(null, supplier);
+    });
+  }
+
+  // Remplir le dropdown des fournisseurs pour la modif en masse
+  function refreshBulkTolSuppliers() {
+    const sel = $('#bulkTolSupplier');
+    if (!sel) return;
+    const suppliers = new Set();
+    Object.values(STATE.articles).forEach(a => { if (a.supplier) suppliers.add(a.supplier); });
+    const sorted = [...suppliers].sort();
+    const totalAll = Object.keys(STATE.articles).length;
+    sel.innerHTML = `<option value="">Tous les fournisseurs (${totalAll.toLocaleString('fr-FR')} articles)</option>` +
+      sorted.map(s => {
+        const count = Object.values(STATE.articles).filter(a => a.supplier === s).length;
+        return `<option value="${escapeAttr(s)}">${escapeHtml(s)} (${count.toLocaleString('fr-FR')} articles)</option>`;
+      }).join('');
+  }
+  refreshBulkTolSuppliers();
+  // Rafraîchir aussi quand la liste articles change
+  setTimeout(refreshBulkTolSuppliers, 1500);  // après chargement Firebase
   $('#btnBackup').addEventListener('click', backupJson);
   $('#btnRestore').addEventListener('click', () => $('#restoreInput').click());
   $('#restoreInput').addEventListener('change', e => e.target.files[0] && restoreJson(e.target.files[0]));
