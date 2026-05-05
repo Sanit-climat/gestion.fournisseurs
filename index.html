@@ -1394,8 +1394,8 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
 </style>
 </head>
 <body>
-<div id="version-banner" style="background:#dc2626;color:white;padding:10px 16px;text-align:center;font-weight:bold;font-family:sans-serif;font-size:14px;position:relative;z-index:9999">
-  🔧 VERSION v25 — FIX URGENT : localStorage saturé (cause des 0 écarts)
+<div id="version-banner" style="background:#16a34a;color:white;padding:10px 16px;text-align:center;font-weight:bold;font-family:sans-serif;font-size:14px;position:relative;z-index:9999">
+  ✅ VERSION v26 — Fix cache stats : écarts visibles dès le démarrage
   <button onclick="this.parentElement.style.display='none'" style="position:absolute;right:10px;top:6px;background:transparent;border:0;color:white;font-size:18px;cursor:pointer">×</button>
 </div>
 
@@ -2437,10 +2437,18 @@ async function fbInit(cfg) {
       const artSnap = await STATE.fb.db.ref('facturecheck/articles').once('value');
       STATE.articles = artSnap.val() || {};
       invalidateArticleIndex();
-      saveLocal();
-      renderArticles();
+      // CRITIQUE : vider le cache des stats facture car il a été calculé sans articles
+      // (les stats étaient à 0 partout puisque STATE.articles était vide au moment du calcul initial)
+      _invoiceStatsCache.clear();
       // Précompute l'index pour matching instantané
       getArticleIndex();
+      // Re-render des écrans qui dépendent des articles (KPI, Écarts, Suivi)
+      renderArticles();
+      renderKPI();
+      renderEcarts();
+      renderInvoices();
+      renderPayment();
+      console.log(`✅ ${Object.keys(STATE.articles).length} articles chargés depuis Firebase`);
     }, 100);
 
     // PAS de listeners live (.on) pour éviter les re-téléchargements à chaque save
