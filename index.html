@@ -1395,7 +1395,7 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
 </head>
 <body>
 <div id="version-banner" style="background:#16a34a;color:white;padding:10px 16px;text-align:center;font-weight:bold;font-family:sans-serif;font-size:14px;position:relative;z-index:9999">
-  ✅ VERSION v23 — Détacher / Réattribuer manuellement les références
+  ✅ VERSION v24 — Modifier références depuis Écarts & alertes
   <button onclick="this.parentElement.style.display='none'" style="position:absolute;right:10px;top:6px;background:transparent;border:0;color:white;font-size:18px;cursor:pointer">×</button>
 </div>
 
@@ -1707,12 +1707,12 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
       <div class="kpi-card kpi-warn">
         <span class="kpi-label">Écarts modérés</span>
         <span class="kpi-value" id="kpiWarn">0</span>
-        <span class="kpi-sub">2-5 % au-dessus</span>
+        <span class="kpi-sub">1,5-3 % au-dessus</span>
       </div>
       <div class="kpi-card kpi-danger">
         <span class="kpi-label">Écarts critiques</span>
         <span class="kpi-value" id="kpiDanger">0</span>
-        <span class="kpi-sub">> 5 % au-dessus</span>
+        <span class="kpi-sub">> 3 % au-dessus</span>
       </div>
       <div class="kpi-card kpi-info">
         <span class="kpi-label">Surcoût total détecté</span>
@@ -5232,6 +5232,16 @@ function renderInvoices() {
     btn.addEventListener('click', () => openInvoiceModal(btn.dataset.view)));
 }
 
+// Fonction centrale : résout le matching d'une ligne en respectant matchOverride
+// À utiliser PARTOUT au lieu de findArticleMatch direct, sauf dans le scan initial
+function resolveLineMatch(line, supplierName) {
+  if (line.matchOverride === 'none') return null;
+  if (line.matchOverride && STATE.articles[line.matchOverride]) {
+    return { article: STATE.articles[line.matchOverride], id: line.matchOverride, score: 1.0 };
+  }
+  return findArticleMatch(line, supplierName);
+}
+
 // Cache des stats par facture (évite de recalculer 100 fois lors d'un rendu de tableau)
 const _invoiceStatsCache = new Map();
 function invalidateInvoiceStats(invoiceId) {
@@ -5240,14 +5250,14 @@ function invalidateInvoiceStats(invoiceId) {
 }
 
 function invoiceStats(invoice) {
-  // Cache key : id facture + nombre articles (pour invalidation auto si import)
+  // Cache key
   const cacheKey = invoice.id || invoice._id;
   if (cacheKey && _invoiceStatsCache.has(cacheKey)) {
     return _invoiceStatsCache.get(cacheKey);
   }
   const stats = { ok: 0, warn: 0, danger: 0, noref: 0, overcost: 0 };
   (invoice.lines || []).forEach(l => {
-    const m = findArticleMatch(l, invoice.supplier);
+    const m = resolveLineMatch(l, invoice.supplier);
     const e = computeEcart(l, m ? m.article : null);
     stats[e.level]++;
     if (e.overcost > 0 && (e.level === 'warn' || e.level === 'danger')) stats.overcost += e.overcost;
@@ -5270,11 +5280,11 @@ function renderEcarts() {
     if (filterSup && inv.supplier !== filterSup) return;
     if (cutoff && inv.date && new Date(inv.date).getTime() < cutoff) return;
     (inv.lines || []).forEach((l, idx) => {
-      const m = findArticleMatch(l, inv.supplier);
+      const m = resolveLineMatch(l, inv.supplier);
       const e = computeEcart(l, m ? m.article : null);
       if (level && e.level !== level) return;
-      if (!level && (e.level === 'ok' || e.level === 'noref')) return; // par défaut on n'affiche que warn/danger
-      rows.push({ inv, line: l, match: m, ecart: e });
+      if (!level && (e.level === 'ok' || e.level === 'noref')) return;
+      rows.push({ invId, inv, line: l, lineIdx: idx, match: m, ecart: e });
     });
   });
 
@@ -5294,15 +5304,66 @@ function renderEcarts() {
         <td>${escapeHtml(r.line.designation || '—')}</td>
         <td class="numeric">${fmt(r.line.qty)} ${escapeHtml(r.line.unit || '')}</td>
         <td class="numeric">${fmtMoney(r.line.pu)}</td>
-        <td class="numeric">${r.match ? fmtMoney(r.match.article.price) : '<span class="muted">—</span>'}</td>
+        <td class="numeric">
+          ${r.match
+            ? `<span title="${escapeAttr(r.match.article.designation || '')}">${fmtMoney(r.match.article.price)}<br><span class="muted small">${escapeHtml(r.match.article.code || '')}</span></span>`
+            : '<span class="muted">—</span>'}
+        </td>
         <td class="numeric cell-ecart">${fmtPct(r.ecart.pct)}</td>
         <td class="numeric">${r.ecart.overcost > 0 ? fmtMoney(r.ecart.overcost) : '—'}</td>
-        <td><button class="btn-mini" data-view="${r.inv.id}">Voir</button></td>
+        <td>
+          <div style="display:flex;gap:4px;flex-wrap:wrap">
+            ${r.match ? `<button class="btn-icon" data-detach-ecart="${r.invId}|${r.lineIdx}" title="Détacher cette référence (mauvais match)">✕</button>` : ''}
+            <button class="btn-icon" data-search-ecart="${r.invId}|${r.lineIdx}" title="Chercher une autre référence">🔍</button>
+            <button class="btn-mini" data-view="${r.invId}">Voir</button>
+          </div>
+        </td>
       </tr>
     `).join('');
 
   tbody.querySelectorAll('[data-view]').forEach(btn =>
     btn.addEventListener('click', () => openInvoiceModal(btn.dataset.view)));
+
+  // Détacher la référence depuis l'écran Écarts
+  tbody.querySelectorAll('[data-detach-ecart]').forEach(btn =>
+    btn.addEventListener('click', async () => {
+      const [invId, idx] = btn.dataset.detachEcart.split('|');
+      const inv = STATE.invoices[invId];
+      if (!inv) return;
+      inv.lines[parseInt(idx)].matchOverride = 'none';
+      invalidateInvoiceStats(invId);
+      await fbWrite('invoices/' + invId, inv);
+      toast('Référence détachée', 'info');
+      renderEcarts();
+      renderKPI();
+    }));
+
+  // Chercher une référence depuis l'écran Écarts
+  tbody.querySelectorAll('[data-search-ecart]').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const [invId, idx] = btn.dataset.searchEcart.split('|');
+      openArticleSearchModalFromEcarts(invId, parseInt(idx));
+    }));
+}
+
+// Ouvrir la modale de recherche depuis l'écran Écarts (mode "édit facture sauvée")
+function openArticleSearchModalFromEcarts(invId, lineIdx) {
+  const inv = STATE.invoices[invId];
+  if (!inv || !inv.lines[lineIdx]) return;
+  const line = inv.lines[lineIdx];
+  _searchInvId = invId;
+  _searchLineIdx = lineIdx;
+  _searchMode = 'saved';
+
+  const modal = $('#articleSearchModal');
+  if (!modal) return;
+
+  const initialQuery = line.code || (line.designation || '').slice(0, 30);
+  $('#articleSearchInput').value = initialQuery;
+  $('#articleSearchSupplier').textContent = inv.supplier || 'tous fournisseurs';
+  performArticleSearch(initialQuery, inv.supplier);
+  modal.hidden = false;
+  setTimeout(() => $('#articleSearchInput').focus(), 50);
 }
 
 // ----- KPI -----
@@ -5313,7 +5374,7 @@ function renderKPI() {
     invCount++;
     if (inv.date && new Date(inv.date) >= cutoff) invMonth++;
     (inv.lines || []).forEach(l => {
-      const m = findArticleMatch(l, inv.supplier);
+      const m = resolveLineMatch(l, inv.supplier);
       const e = computeEcart(l, m ? m.article : null);
       if (e.level === 'ok') ok++;
       else if (e.level === 'warn') { warn++; if (e.overcost > 0) overcost += e.overcost; }
@@ -5955,19 +6016,7 @@ function renderCurrentLines() {
   }
 
   body.innerHTML = inv.lines.map((l, i) => {
-    // Si la ligne a un matchOverride, on l'utilise au lieu de chercher
-    let m = null;
-    if (l.matchOverride === 'none') {
-      // L'utilisateur a explicitement détaché : pas de match
-      m = null;
-    } else if (l.matchOverride) {
-      // Match forcé manuellement (id article)
-      const article = STATE.articles[l.matchOverride];
-      if (article) m = { article, id: l.matchOverride, score: 1.0 };
-    } else {
-      // Match auto par défaut
-      m = findArticleMatch(l, inv.supplier || $('#invSupplier').value);
-    }
+    const m = resolveLineMatch(l, inv.supplier || $('#invSupplier').value);
 
     const e = computeEcart(l, m ? m.article : null);
     let ecartCell = '<span class="muted">—</span>';
@@ -6066,14 +6115,17 @@ function renderCurrentLines() {
 // MODAL DE RECHERCHE MANUELLE D'ARTICLE pour réattribution
 // ============================================================
 let _searchLineIdx = -1;
+let _searchInvId = null;       // si mode 'saved' : id de la facture déjà enregistrée
+let _searchMode = 'current';   // 'current' = facture en cours d'extraction, 'saved' = facture déjà sauvée
 function openArticleSearchModal(lineIdx) {
   _searchLineIdx = lineIdx;
+  _searchInvId = null;
+  _searchMode = 'current';
   const line = STATE.currentInvoice.lines[lineIdx];
   const supplier = $('#invSupplier').value.trim();
   const modal = $('#articleSearchModal');
   if (!modal) return;
 
-  // Pré-remplir le champ de recherche avec le code ou la désignation
   const initialQuery = line.code || (line.designation || '').slice(0, 30);
   $('#articleSearchInput').value = initialQuery;
   $('#articleSearchSupplier').textContent = supplier || 'tous fournisseurs';
@@ -6134,14 +6186,31 @@ function performArticleSearch(query, supplierName) {
   `).join('');
 
   tbody.querySelectorAll('[data-pick]').forEach(btn =>
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', async () => {
       const articleId = btn.dataset.pick;
-      if (_searchLineIdx >= 0 && STATE.currentInvoice.lines[_searchLineIdx]) {
-        STATE.currentInvoice.lines[_searchLineIdx].matchOverride = articleId;
-        toast('Référence attribuée', 'ok');
-        $('#articleSearchModal').hidden = true;
-        _searchLineIdx = -1;
-        renderCurrentLines();
+      if (_searchMode === 'saved' && _searchInvId) {
+        // Facture déjà enregistrée : modifier directement et resauver
+        const inv = STATE.invoices[_searchInvId];
+        if (inv && inv.lines[_searchLineIdx]) {
+          inv.lines[_searchLineIdx].matchOverride = articleId;
+          invalidateInvoiceStats(_searchInvId);
+          await fbWrite('invoices/' + _searchInvId, inv);
+          toast('Référence attribuée', 'ok');
+          $('#articleSearchModal').hidden = true;
+          _searchLineIdx = -1; _searchInvId = null; _searchMode = 'current';
+          renderEcarts();
+          renderKPI();
+          renderInvoices();
+        }
+      } else {
+        // Mode 'current' : facture en cours d'extraction
+        if (_searchLineIdx >= 0 && STATE.currentInvoice.lines[_searchLineIdx]) {
+          STATE.currentInvoice.lines[_searchLineIdx].matchOverride = articleId;
+          toast('Référence attribuée', 'ok');
+          $('#articleSearchModal').hidden = true;
+          _searchLineIdx = -1;
+          renderCurrentLines();
+        }
       }
     }));
 }
