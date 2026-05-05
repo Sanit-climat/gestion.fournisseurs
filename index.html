@@ -1394,8 +1394,8 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
 </style>
 </head>
 <body>
-<div id="version-banner" style="background:#16a34a;color:white;padding:10px 16px;text-align:center;font-weight:bold;font-family:sans-serif;font-size:14px;position:relative;z-index:9999">
-  ✅ VERSION v24 — Modifier références depuis Écarts & alertes
+<div id="version-banner" style="background:#dc2626;color:white;padding:10px 16px;text-align:center;font-weight:bold;font-family:sans-serif;font-size:14px;position:relative;z-index:9999">
+  🔧 VERSION v25 — FIX URGENT : localStorage saturé (cause des 0 écarts)
   <button onclick="this.parentElement.style.display='none'" style="position:absolute;right:10px;top:6px;background:transparent;border:0;color:white;font-size:18px;cursor:pointer">×</button>
 </div>
 
@@ -2355,10 +2355,10 @@ function loadLocal() {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return;
     const data = JSON.parse(raw);
-    STATE.articles = data.articles || {};
+    // Articles : peuvent venir de l'ancienne version OU pas (en v25+ on ne les save plus)
+    if (data.articles) STATE.articles = data.articles;
     STATE.suppliers = data.suppliers || {};
     STATE.invoices = data.invoices || {};
-    // Propager l'id interne pour cache
     for (const id in STATE.invoices) {
       if (STATE.invoices[id]) STATE.invoices[id]._id = id;
     }
@@ -2366,34 +2366,44 @@ function loadLocal() {
   } catch(e) { console.warn('loadLocal', e); }
 }
 
+// localStorage limité à ~5-10 Mo. Avec 35k+ articles on dépasse facilement.
+// Stratégie : on NE SAUVE PAS les articles en local (ils sont dans Firebase).
+// Seules les factures + config sont sauvegardées localement comme cache de secours.
 let _saveLocalTimer = null;
 function saveLocal() {
-  // Debounce 300ms : si plusieurs saves rapprochés, on ne fait qu'une seule écriture
   if (_saveLocalTimer) clearTimeout(_saveLocalTimer);
-  _saveLocalTimer = setTimeout(() => {
-    try {
-      localStorage.setItem(LS_KEY, JSON.stringify({
-        articles: STATE.articles,
-        suppliers: STATE.suppliers,
-        invoices: STATE.invoices,
-        config: STATE.config,
-      }));
-    } catch(e) { console.warn('saveLocal', e); }
-    _saveLocalTimer = null;
-  }, 300);
+  _saveLocalTimer = setTimeout(() => doSaveLocal(), 300);
 }
 
-// Variante synchrone pour les cas critiques (export, fermeture)
 function saveLocalSync() {
   if (_saveLocalTimer) { clearTimeout(_saveLocalTimer); _saveLocalTimer = null; }
+  doSaveLocal();
+}
+
+function doSaveLocal() {
   try {
+    // Pas d'articles dans le localStorage : trop volumineux. Ils viennent de Firebase au boot.
     localStorage.setItem(LS_KEY, JSON.stringify({
-      articles: STATE.articles,
       suppliers: STATE.suppliers,
       invoices: STATE.invoices,
       config: STATE.config,
     }));
-  } catch(e) { console.warn('saveLocalSync', e); }
+  } catch(e) {
+    // Si encore plein, on tente sans les factures les plus anciennes
+    if (e.name === 'QuotaExceededError') {
+      console.warn('localStorage saturé, tentative de sauvegarde minimale');
+      try {
+        localStorage.setItem(LS_KEY, JSON.stringify({
+          suppliers: STATE.suppliers,
+          config: STATE.config,
+        }));
+      } catch(e2) {
+        console.error('Impossible de sauver en local : ', e2);
+      }
+    } else {
+      console.warn('saveLocal', e);
+    }
+  }
 }
 
 async function fbInit(cfg) {
