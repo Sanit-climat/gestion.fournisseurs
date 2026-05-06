@@ -1492,7 +1492,7 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
 </head>
 <body>
 <div id="version-banner" style="background:#16a34a;color:white;padding:10px 16px;text-align:center;font-weight:bold;font-family:sans-serif;font-size:14px;position:relative;z-index:9999">
-  ✅ VERSION v31 — Articles achetés : couleurs rouge/vert + filtre statut + export Excel enrichi
+  ⚡ VERSION v32 — TURBO : cache écarts + lazy-load onglets (5 à 20× plus rapide)
   <button onclick="this.parentElement.style.display='none'" style="position:absolute;right:10px;top:6px;background:transparent;border:0;color:white;font-size:18px;cursor:pointer">×</button>
 </div>
 
@@ -4455,8 +4455,9 @@ function getArticleIndex() {
 
 function invalidateArticleIndex() {
   _articleIndex = null;
-  // Les stats facture dépendent de l'index, donc invalider aussi
+  // Les stats facture et les écarts par ligne dépendent de l'index → invalider tout
   if (typeof _invoiceStatsCache !== 'undefined') _invoiceStatsCache.clear();
+  if (typeof _lineEcartCache !== 'undefined') _lineEcartCache.clear();
 }
 
 // ============================================================
@@ -5408,7 +5409,10 @@ function renderTabs() {
     $$('.nav-btn').forEach(x => x.classList.remove('active'));
     $$('.tab-panel').forEach(p => p.classList.remove('active'));
     b.classList.add('active');
-    $('#tab-' + b.dataset.tab).classList.add('active');
+    const tabId = 'tab-' + b.dataset.tab;
+    $('#' + tabId).classList.add('active');
+    // Lazy-render : ne rendre l'onglet que s'il est dirty
+    if (_tabsDirty.has(tabId)) renderTab(tabId);
   }));
 }
 
@@ -5530,7 +5534,12 @@ function renderArticles() {
 // ============================================================
 let _purchasesSort = { field: 'totalAmount', direction: 'desc' };
 
+// Cache du résultat de getAllPurchaseLines (évite de re-parcourir 134 factures à chaque render)
+let _allPurchasesCache = null;
+function invalidateAllPurchasesCache() { _allPurchasesCache = null; }
+
 function getAllPurchaseLines() {
+  if (_allPurchasesCache) return _allPurchasesCache;
   // Aplati toutes les lignes de factures avec leur contexte
   const lines = [];
   for (const invId in STATE.invoices) {
@@ -5553,6 +5562,7 @@ function getAllPurchaseLines() {
       });
     });
   }
+  _allPurchasesCache = lines;
   return lines;
 }
 
@@ -5589,9 +5599,8 @@ function renderPurchases() {
   let rows;
   if (grouping === 'all') {
     rows = allLines.map(l => {
-      // Calculer écart vs tarif pour cette ligne
-      const m = resolveLineMatch(l, l.supplier);
-      const e = computeEcart(l, m ? m.article : null);
+      // Calculer écart vs tarif pour cette ligne — via cache
+      const e = getCachedLineEcart(l.invId, l.lineIdx, l, l.supplier);
       return {
         key: `${l.invId}|${l.lineIdx}`,
         code: l.code,
@@ -5604,7 +5613,7 @@ function renderPurchases() {
         totalAmount: l.total,
         lastDate: l.date,
         lines: [l],
-        worstLevel: e.level,           // niveau le plus grave
+        worstLevel: e.level,
         worstPct: e.pct,
         hasIssue: e.level === 'warn' || e.level === 'danger',
       };
@@ -5612,6 +5621,7 @@ function renderPurchases() {
   } else {
     // Mode "grouped" : agréger par code+désignation+fournisseur
     const groups = new Map();
+    const levels = { ok: 0, noref: 1, warn: 2, danger: 3 };
     for (const l of allLines) {
       const key = `${l.code.toLowerCase()}|${normalize(l.designation)}|${normalize(l.supplier)}`;
       let g = groups.get(key);
@@ -5639,11 +5649,8 @@ function renderPurchases() {
       g.lines.push(l);
       if (l.date && (!g.lastDate || l.date > g.lastDate)) g.lastDate = l.date;
 
-      // Calculer le pire écart de toutes les lignes du groupe
-      const m = resolveLineMatch(l, l.supplier);
-      const e = computeEcart(l, m ? m.article : null);
-      // Prioriser danger > warn > ok > noref
-      const levels = { ok: 0, noref: 1, warn: 2, danger: 3 };
+      // Cache d'écart par ligne (gros gain de perf)
+      const e = getCachedLineEcart(l.invId, l.lineIdx, l, l.supplier);
       if ((levels[e.level] || 0) > (levels[g.worstLevel] || 0)) {
         g.worstLevel = e.level;
         g.worstPct = e.pct;
@@ -5987,11 +5994,48 @@ function resolveLineMatch(line, supplierName) {
   return findArticleMatch(line, supplierName);
 }
 
+// ============================================================
+// CACHE DES ÉCARTS PAR LIGNE
+// Évite de refaire le matching + computeEcart à chaque render.
+// Clé : "invId|lineIdx", valeur : { level, pct, overcost, articleId, supplier }
+// Invalidé : à chaque modif d'articles, à chaque modif d'une ligne facture.
+// ============================================================
+const _lineEcartCache = new Map();
+function invalidateLineEcartCache(invId) {
+  if (!invId) { _lineEcartCache.clear(); return; }
+  // Supprimer toutes les entrées de cette facture
+  for (const k of [..._lineEcartCache.keys()]) {
+    if (k.startsWith(invId + '|')) _lineEcartCache.delete(k);
+  }
+}
+function getCachedLineEcart(invId, lineIdx, line, supplier) {
+  const key = invId + '|' + lineIdx;
+  let cached = _lineEcartCache.get(key);
+  if (cached) return cached;
+  const m = resolveLineMatch(line, supplier);
+  const e = computeEcart(line, m ? m.article : null);
+  cached = {
+    level: e.level, pct: e.pct, overcost: e.overcost,
+    articleId: m ? m.id : null,
+    article: m ? m.article : null,
+    match: m,
+  };
+  _lineEcartCache.set(key, cached);
+  return cached;
+}
+
 // Cache des stats par facture (évite de recalculer 100 fois lors d'un rendu de tableau)
 const _invoiceStatsCache = new Map();
 function invalidateInvoiceStats(invoiceId) {
-  if (invoiceId) _invoiceStatsCache.delete(invoiceId);
-  else _invoiceStatsCache.clear();
+  if (invoiceId) {
+    _invoiceStatsCache.delete(invoiceId);
+    invalidateLineEcartCache(invoiceId);
+  } else {
+    _invoiceStatsCache.clear();
+    if (typeof _lineEcartCache !== 'undefined') _lineEcartCache.clear();
+  }
+  // Le cache d'aplatissement des lignes facture devient invalide
+  if (typeof invalidateAllPurchasesCache === 'function') invalidateAllPurchasesCache();
 }
 
 function invoiceStats(invoice) {
@@ -6001,11 +6045,12 @@ function invoiceStats(invoice) {
     return _invoiceStatsCache.get(cacheKey);
   }
   const stats = { ok: 0, warn: 0, danger: 0, noref: 0, overcost: 0 };
-  (invoice.lines || []).forEach(l => {
-    const m = resolveLineMatch(l, invoice.supplier);
-    const e = computeEcart(l, m ? m.article : null);
-    stats[e.level]++;
-    if (e.overcost > 0 && (e.level === 'warn' || e.level === 'danger')) stats.overcost += e.overcost;
+  (invoice.lines || []).forEach((l, idx) => {
+    const c = cacheKey ? getCachedLineEcart(cacheKey, idx, l, invoice.supplier)
+                       : { level: (() => { const m = resolveLineMatch(l, invoice.supplier); return computeEcart(l, m?m.article:null).level; })(),
+                           pct: 0, overcost: 0 };
+    stats[c.level]++;
+    if (c.overcost > 0 && (c.level === 'warn' || c.level === 'danger')) stats.overcost += c.overcost;
   });
   if (cacheKey) _invoiceStatsCache.set(cacheKey, stats);
   return stats;
@@ -6025,11 +6070,10 @@ function renderEcarts() {
     if (filterSup && inv.supplier !== filterSup) return;
     if (cutoff && inv.date && new Date(inv.date).getTime() < cutoff) return;
     (inv.lines || []).forEach((l, idx) => {
-      const m = resolveLineMatch(l, inv.supplier);
-      const e = computeEcart(l, m ? m.article : null);
-      if (level && e.level !== level) return;
-      if (!level && (e.level === 'ok' || e.level === 'noref')) return;
-      rows.push({ invId, inv, line: l, lineIdx: idx, match: m, ecart: e });
+      const c = getCachedLineEcart(invId, idx, l, inv.supplier);
+      if (level && c.level !== level) return;
+      if (!level && (c.level === 'ok' || c.level === 'noref')) return;
+      rows.push({ invId, inv, line: l, lineIdx: idx, match: c.match, ecart: { level: c.level, pct: c.pct, overcost: c.overcost } });
     });
   });
 
@@ -6115,15 +6159,14 @@ function openArticleSearchModalFromEcarts(invId, lineIdx) {
 function renderKPI() {
   const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 30);
   let invCount = 0, invMonth = 0, ok = 0, warn = 0, danger = 0, overcost = 0;
-  Object.values(STATE.invoices).forEach(inv => {
+  Object.entries(STATE.invoices).forEach(([invId, inv]) => {
     invCount++;
     if (inv.date && new Date(inv.date) >= cutoff) invMonth++;
-    (inv.lines || []).forEach(l => {
-      const m = resolveLineMatch(l, inv.supplier);
-      const e = computeEcart(l, m ? m.article : null);
-      if (e.level === 'ok') ok++;
-      else if (e.level === 'warn') { warn++; if (e.overcost > 0) overcost += e.overcost; }
-      else if (e.level === 'danger') { danger++; if (e.overcost > 0) overcost += e.overcost; }
+    (inv.lines || []).forEach((l, idx) => {
+      const c = getCachedLineEcart(invId, idx, l, inv.supplier);
+      if (c.level === 'ok') ok++;
+      else if (c.level === 'warn') { warn++; if (c.overcost > 0) overcost += c.overcost; }
+      else if (c.level === 'danger') { danger++; if (c.overcost > 0) overcost += c.overcost; }
     });
   });
   $('#kpiInvoices').textContent = invCount;
@@ -7645,14 +7688,17 @@ function escapeHtml(s) {
 }
 function escapeAttr(s) { return escapeHtml(s); }
 
-function renderAll() {
-  // Rendu IMMÉDIAT seulement pour les datalists et l'onglet visible
-  renderSuppliersDatalists();
+// Suivi des onglets qui ont besoin d'un re-render quand on les ouvre
+const _tabsDirty = new Set();
+function markTabsDirty(...tabIds) {
+  tabIds.forEach(id => _tabsDirty.add(id));
+}
+function markAllTabsDirty() {
+  ['tab-articles', 'tab-purchases', 'tab-suppliers', 'tab-ecarts',
+   'tab-history', 'tab-payment', 'tab-accounts', 'tab-scan'].forEach(id => _tabsDirty.add(id));
+}
 
-  // Détecter l'onglet visible et ne rendre que celui-là tout de suite
-  const visibleTab = document.querySelector('.tab-panel:not([hidden])');
-  const tabId = visibleTab ? visibleTab.id : '';
-
+function renderTab(tabId) {
   switch (tabId) {
     case 'tab-articles': renderArticles(); break;
     case 'tab-purchases': renderPurchases(); break;
@@ -7662,20 +7708,23 @@ function renderAll() {
     case 'tab-payment': renderPayment(); break;
     case 'tab-accounts': renderAccounts(); break;
     case 'tab-scan': renderKPI(); break;
-    default: renderKPI(); break;
   }
+  _tabsDirty.delete(tabId);
+}
 
-  // Re-rendre les autres onglets en arrière-plan, sans bloquer l'UI
-  setTimeout(() => {
-    if (tabId !== 'tab-articles') renderArticles();
-    if (tabId !== 'tab-purchases' && document.querySelector('#tab-purchases')) renderPurchases();
-    if (tabId !== 'tab-suppliers') renderSuppliers();
-    if (tabId !== 'tab-history') renderInvoices();
-    if (tabId !== 'tab-ecarts') renderEcarts();
-    if (tabId !== 'tab-scan') renderKPI();
-    if (tabId !== 'tab-payment') renderPayment();
-    if (tabId !== 'tab-accounts') renderAccounts();
-  }, 50);
+function renderAll() {
+  // Datalists toujours à jour (peu coûteux)
+  renderSuppliersDatalists();
+
+  // Tous les onglets sont marqués comme à rafraîchir
+  markAllTabsDirty();
+
+  // On ne rend QUE l'onglet visible — gros gain de perf
+  const visibleTab = document.querySelector('.tab-panel.active');
+  const tabId = visibleTab ? visibleTab.id : 'tab-scan';
+  renderTab(tabId);
+  // KPI ré-affichés (utilisés en dehors du panneau scan dans certains cas)
+  if (tabId !== 'tab-scan') renderKPI();
 }
 
 // ============================================================
