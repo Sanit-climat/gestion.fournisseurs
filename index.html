@@ -1288,6 +1288,35 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
   border-color: var(--danger);
 }
 
+/* Historique d'achats : stats en grille */
+.hist-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 10px;
+}
+.hist-stat {
+  background: var(--bg-3);
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: center;
+}
+.hist-stat-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--muted);
+  letter-spacing: 0.5px;
+}
+.hist-stat-value {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+.hist-stat-value.text-ok { color: var(--ok); }
+.hist-stat-value.text-danger { color: var(--danger); }
+
 .multi-pay-item {
   display: flex;
   justify-content: space-between;
@@ -1395,7 +1424,7 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
 </head>
 <body>
 <div id="version-banner" style="background:#16a34a;color:white;padding:10px 16px;text-align:center;font-weight:bold;font-family:sans-serif;font-size:14px;position:relative;z-index:9999">
-  ✅ VERSION v26 — Fix cache stats : écarts visibles dès le démarrage
+  ✅ VERSION v27 — Historique d'achats par article (bouton 📊)
   <button onclick="this.parentElement.style.display='none'" style="position:absolute;right:10px;top:6px;background:transparent;border:0;color:white;font-size:18px;cursor:pointer">×</button>
 </div>
 
@@ -2230,6 +2259,36 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
 </div>
 
 <!-- MODAL PAIEMENT -->
+<div class="modal" id="articleHistoryModal" hidden>
+  <div class="modal-content" style="max-width:900px">
+    <div class="modal-head">
+      <div>
+        <h3>📊 Historique d'achats</h3>
+        <div id="historyTitle" style="font-size:14px;color:var(--text-soft);margin-top:4px"></div>
+        <div id="historySubtitle" class="muted small" style="margin-top:2px"></div>
+      </div>
+      <button class="icon-btn" data-close="articleHistoryModal">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="historyStats" class="hist-stats-grid"></div>
+      <div class="table-wrap" style="max-height:50vh;overflow-y:auto;margin-top:16px">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Date</th>
+              <th>N° facture</th>
+              <th>Quantité</th>
+              <th>Prix unitaire</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="historyTbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="articleSearchModal" hidden>
   <div class="modal-content" style="max-width:900px">
     <div class="modal-head">
@@ -5128,7 +5187,12 @@ function renderArticles() {
         <td class="numeric">${fmtMoney(a.price)}</td>
         <td class="numeric">${fmtDate(a.updatedAt)}</td>
         <td class="numeric">${a.tolerance != null && a.tolerance !== '' ? a.tolerance + ' %' : '<span class="muted">défaut</span>'}</td>
-        <td><button class="btn-mini" data-edit="${a.id}">Modifier</button></td>
+        <td>
+          <div style="display:flex;gap:4px">
+            <button class="btn-mini" data-edit="${a.id}">Modifier</button>
+            <button class="btn-mini" data-history="${a.id}" title="Historique des achats">📊</button>
+          </div>
+        </td>
       </tr>
     `;
     }).join('');
@@ -5141,6 +5205,8 @@ function renderArticles() {
 
   tbody.querySelectorAll('[data-edit]').forEach(btn =>
     btn.addEventListener('click', () => openArticleModal(btn.dataset.edit)));
+  tbody.querySelectorAll('[data-history]').forEach(btn =>
+    btn.addEventListener('click', () => openArticleHistoryModal(btn.dataset.history)));
 }
 
 // ----- FOURNISSEURS -----
@@ -6135,6 +6201,129 @@ function renderCurrentLines() {
 let _searchLineIdx = -1;
 let _searchInvId = null;       // si mode 'saved' : id de la facture déjà enregistrée
 let _searchMode = 'current';   // 'current' = facture en cours d'extraction, 'saved' = facture déjà sauvée
+// ============================================================
+// MODAL HISTORIQUE D'ACHATS pour un article donné
+// ============================================================
+function openArticleHistoryModal(articleId) {
+  const article = STATE.articles[articleId];
+  if (!article) return;
+
+  // Parcourir toutes les factures pour trouver les lignes concernant cet article
+  // Match par : matchOverride === articleId, OU code/supplierCode identique au même fournisseur
+  const purchases = [];
+  for (const invId in STATE.invoices) {
+    const inv = STATE.invoices[invId];
+    if (!inv || !inv.lines) continue;
+    inv.lines.forEach((line, lineIdx) => {
+      let isMatch = false;
+      if (line.matchOverride === articleId) {
+        isMatch = true;
+      } else if (line.matchOverride === 'none') {
+        isMatch = false;  // explicitement détaché
+      } else {
+        // Match auto par code (ou supplierCode) + même fournisseur
+        const lineCode = (line.code || '').toLowerCase().trim();
+        const artCode = (article.code || '').toLowerCase().trim();
+        const artSupCode = (article.supplierCode || '').toLowerCase().trim();
+        if (lineCode && (lineCode === artCode || lineCode === artSupCode)) {
+          // Vérif fournisseur si défini
+          if (!article.supplier || !inv.supplier ||
+              normalize(article.supplier) === normalize(inv.supplier)) {
+            isMatch = true;
+          }
+        }
+      }
+      if (isMatch) {
+        purchases.push({
+          invId, lineIdx,
+          date: inv.date,
+          number: inv.number,
+          supplier: inv.supplier,
+          qty: line.qty,
+          unit: line.unit,
+          pu: parseFloat(line.pu) || 0,
+          total: (parseFloat(line.qty) || 1) * (parseFloat(line.pu) || 0),
+        });
+      }
+    });
+  }
+
+  // Tri : plus récent en haut
+  purchases.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+
+  // Stats
+  const tarif = parseFloat(article.price) || 0;
+  let stats = null;
+  if (purchases.length > 0) {
+    const prices = purchases.map(p => p.pu).filter(p => p > 0);
+    const totalQty = purchases.reduce((s, p) => s + (parseFloat(p.qty) || 0), 0);
+    stats = {
+      count: purchases.length,
+      min: Math.min(...prices),
+      max: Math.max(...prices),
+      avg: prices.reduce((s, p) => s + p, 0) / prices.length,
+      totalQty,
+      totalAmount: purchases.reduce((s, p) => s + p.total, 0),
+    };
+  }
+
+  // En-tête de la modale
+  $('#historyTitle').textContent = article.designation || article.code || 'Article';
+  $('#historySubtitle').innerHTML = `
+    <strong>${escapeHtml(article.code || '')}</strong> · ${escapeHtml(article.supplier || '—')} · Tarif négocié : <strong>${fmtMoney(tarif)}</strong>
+  `;
+
+  // Stats en haut
+  if (stats) {
+    $('#historyStats').innerHTML = `
+      <div class="hist-stat"><span class="hist-stat-label">Achats</span><span class="hist-stat-value">${stats.count}</span></div>
+      <div class="hist-stat"><span class="hist-stat-label">Qté totale</span><span class="hist-stat-value">${fmt(stats.totalQty)}</span></div>
+      <div class="hist-stat"><span class="hist-stat-label">Prix min</span><span class="hist-stat-value text-ok">${fmtMoney(stats.min)}</span></div>
+      <div class="hist-stat"><span class="hist-stat-label">Prix moyen</span><span class="hist-stat-value">${fmtMoney(stats.avg)}</span></div>
+      <div class="hist-stat"><span class="hist-stat-label">Prix max</span><span class="hist-stat-value text-danger">${fmtMoney(stats.max)}</span></div>
+      <div class="hist-stat"><span class="hist-stat-label">Total dépensé</span><span class="hist-stat-value">${fmtMoney(stats.totalAmount)}</span></div>
+    `;
+  } else {
+    $('#historyStats').innerHTML = '<div class="muted">Aucun achat trouvé pour cet article.</div>';
+  }
+
+  // Tableau historique
+  if (purchases.length === 0) {
+    $('#historyTbody').innerHTML = `<tr><td colspan="5" class="muted" style="text-align:center;padding:20px">Cet article n'a encore jamais été facturé.</td></tr>`;
+  } else {
+    $('#historyTbody').innerHTML = purchases.map(p => {
+      // Comparaison au tarif
+      let badge = '';
+      if (tarif > 0 && p.pu > 0) {
+        const pct = ((p.pu - tarif) / tarif) * 100;
+        const tw = STATE.config.threshWarn || 1.5;
+        const td = STATE.config.threshDanger || 3;
+        if (pct >= td) badge = `<span class="badge badge-danger">${fmtPct(pct)}</span>`;
+        else if (pct >= tw) badge = `<span class="badge badge-warn">${fmtPct(pct)}</span>`;
+        else if (pct <= -tw) badge = `<span class="badge badge-ok">${fmtPct(pct)}</span>`;
+        else badge = `<span class="badge badge-ok">${fmtPct(pct)}</span>`;
+      }
+      return `
+        <tr>
+          <td>${fmtDate(p.date)}</td>
+          <td><strong>${escapeHtml(p.number || '—')}</strong></td>
+          <td class="numeric">${fmt(p.qty)} ${escapeHtml(p.unit || '')}</td>
+          <td class="numeric"><strong>${fmtMoney(p.pu)}</strong> ${badge}</td>
+          <td><button class="btn-mini" data-hist-view="${p.invId}">Voir facture</button></td>
+        </tr>
+      `;
+    }).join('');
+
+    $('#historyTbody').querySelectorAll('[data-hist-view]').forEach(b =>
+      b.addEventListener('click', () => {
+        $('#articleHistoryModal').hidden = true;
+        openInvoiceModal(b.dataset.histView);
+      }));
+  }
+
+  $('#articleHistoryModal').hidden = false;
+}
+
 function openArticleSearchModal(lineIdx) {
   _searchLineIdx = lineIdx;
   _searchInvId = null;
