@@ -1317,6 +1317,57 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
 .hist-stat-value.text-ok { color: var(--ok); }
 .hist-stat-value.text-danger { color: var(--danger); }
 
+/* En-têtes triables */
+.sortable-table th.sortable {
+  cursor: pointer;
+  user-select: none;
+  position: relative;
+  padding-right: 24px;
+}
+.sortable-table th.sortable:hover {
+  color: var(--accent);
+}
+.sortable-table th.sortable.sorted {
+  color: var(--accent);
+}
+.sortable-table th.sortable .sort-arrow {
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.sortable-table th.sortable.sorted .sort-arrow {
+  color: var(--accent);
+}
+
+/* Équivalences inter-fournisseurs */
+.equiv-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--bg-3);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+}
+.equiv-item.equiv-suggestion {
+  border-left: 3px solid var(--accent);
+}
+.equiv-info {
+  flex: 1;
+  min-width: 0;
+}
+.equiv-info strong {
+  display: inline-block;
+  margin-right: 6px;
+}
+.equiv-price {
+  font-weight: 700;
+  font-size: 16px;
+  color: var(--text);
+  min-width: 90px;
+  text-align: right;
+}
+
 .multi-pay-item {
   display: flex;
   justify-content: space-between;
@@ -1424,7 +1475,7 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
 </head>
 <body>
 <div id="version-banner" style="background:#16a34a;color:white;padding:10px 16px;text-align:center;font-weight:bold;font-family:sans-serif;font-size:14px;position:relative;z-index:9999">
-  ✅ VERSION v27 — Historique d'achats par article (bouton 📊)
+  ✅ VERSION v30 — Désignation dans historique + nouvel onglet Articles achetés
   <button onclick="this.parentElement.style.display='none'" style="position:absolute;right:10px;top:6px;background:transparent;border:0;color:white;font-size:18px;cursor:pointer">×</button>
 </div>
 
@@ -1454,6 +1505,10 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
       <button class="nav-btn" data-tab="articles">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 7L12 3 4 7m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
         Base articles
+      </button>
+      <button class="nav-btn" data-tab="purchases">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11H7a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2h-2M9 11V7a3 3 0 1 1 6 0v4M9 11h6"/></svg>
+        Articles achetés
       </button>
       <button class="nav-btn" data-tab="suppliers">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l1-5h16l1 5M3 9v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9M3 9h18M9 13h6"/></svg>
@@ -1666,16 +1721,16 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
     </div>
 
     <div class="table-wrap">
-      <table class="data-table">
+      <table class="data-table sortable-table">
         <thead>
           <tr>
-            <th>Code</th>
-            <th>Désignation</th>
-            <th>Fournisseur</th>
-            <th>Catégorie</th>
+            <th class="sortable" data-sort="code">Code <span class="sort-arrow"></span></th>
+            <th class="sortable" data-sort="designation">Désignation <span class="sort-arrow"></span></th>
+            <th class="sortable" data-sort="supplier">Fournisseur <span class="sort-arrow"></span></th>
+            <th class="sortable" data-sort="category">Catégorie <span class="sort-arrow"></span></th>
             <th>Unité</th>
-            <th>Prix réf. HT</th>
-            <th>Mise à jour</th>
+            <th class="sortable" data-sort="price">Prix réf. HT <span class="sort-arrow"></span></th>
+            <th class="sortable" data-sort="updatedAt">Mise à jour <span class="sort-arrow"></span></th>
             <th>Tolérance</th>
             <th>Actions</th>
           </tr>
@@ -1687,7 +1742,72 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
     </div>
   </section>
 
-  <!-- ============== ONGLET FOURNISSEURS ============== -->
+  <!-- ============== ONGLET ARTICLES ACHETÉS ============== -->
+  <section class="tab-panel" id="tab-purchases">
+    <div class="page-header">
+      <div>
+        <h2>Articles achetés</h2>
+        <p class="muted">Toutes les lignes de factures, agrégées par référence + désignation. Cliquez pour voir le détail.</p>
+      </div>
+      <div class="page-actions">
+        <button class="btn btn-secondary" id="btnExportPurchases">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          Export rapport
+        </button>
+      </div>
+    </div>
+
+    <div class="kpi-row">
+      <div class="kpi-card">
+        <span class="kpi-label">Lignes facturées</span>
+        <span class="kpi-value" id="kpiPurchaseLines">0</span>
+        <span class="kpi-sub">total cumulé</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Articles uniques</span>
+        <span class="kpi-value" id="kpiPurchaseUnique">0</span>
+        <span class="kpi-sub">références différentes</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">Montant total</span>
+        <span class="kpi-value" id="kpiPurchaseAmount">0,00 €</span>
+        <span class="kpi-sub">HT</span>
+      </div>
+    </div>
+
+    <div class="filters">
+      <input type="search" id="searchPurchases" placeholder="Rechercher code, désignation…">
+      <select id="filterPurchaseSupplier"><option value="">Tous fournisseurs</option></select>
+      <select id="filterPurchaseGrouping">
+        <option value="grouped">Regrouper par référence</option>
+        <option value="all">Toutes les lignes (détaillées)</option>
+      </select>
+      <span class="count-pill" id="purchasesCount">0 lignes</span>
+    </div>
+
+    <div class="table-wrap">
+      <table class="data-table sortable-table">
+        <thead>
+          <tr>
+            <th class="sortable" data-sort-purchase="code">Code <span class="sort-arrow"></span></th>
+            <th class="sortable" data-sort-purchase="designation">Désignation <span class="sort-arrow"></span></th>
+            <th class="sortable" data-sort-purchase="supplier">Fournisseur <span class="sort-arrow"></span></th>
+            <th class="sortable" data-sort-purchase="count">Achats <span class="sort-arrow"></span></th>
+            <th class="sortable" data-sort-purchase="qty">Qté totale <span class="sort-arrow"></span></th>
+            <th class="sortable" data-sort-purchase="avgPrice">Prix moyen <span class="sort-arrow"></span></th>
+            <th class="sortable" data-sort-purchase="totalAmount">Montant total <span class="sort-arrow"></span></th>
+            <th class="sortable" data-sort-purchase="lastDate">Dernier achat <span class="sort-arrow"></span></th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="purchasesBody">
+          <tr class="empty-row"><td colspan="9">Aucun article acheté.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============== ONGLET FOURNISSEURS ============== --->
   <section class="tab-panel" id="tab-suppliers">
     <div class="page-header">
       <div>
@@ -2259,6 +2379,27 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
 </div>
 
 <!-- MODAL PAIEMENT -->
+<div class="modal" id="articleEquivModal" hidden>
+  <div class="modal-content" style="max-width:900px">
+    <div class="modal-head">
+      <div>
+        <h3>🔗 Équivalents inter-fournisseurs</h3>
+        <div id="equivTitle" style="font-size:14px;color:var(--text-soft);margin-top:4px"></div>
+        <div id="equivSubtitle" class="muted small" style="margin-top:2px"></div>
+      </div>
+      <button class="icon-btn" data-close="articleEquivModal">×</button>
+    </div>
+    <div class="modal-body">
+      <h4 style="margin-bottom:8px">Articles déjà liés</h4>
+      <div id="equivLinkedList"></div>
+
+      <h4 style="margin:20px 0 8px 0">Suggestions automatiques</h4>
+      <p class="muted small" style="margin-bottom:8px">Articles d'autres fournisseurs avec une désignation proche.</p>
+      <div id="equivSuggestionsList"></div>
+    </div>
+  </div>
+</div>
+
 <div class="modal" id="articleHistoryModal" hidden>
   <div class="modal-content" style="max-width:900px">
     <div class="modal-head">
@@ -2277,6 +2418,7 @@ tr.due-soon td:nth-child(3) { color: var(--warn); font-weight: 600; }
             <tr>
               <th>Date</th>
               <th>N° facture</th>
+              <th>Désignation sur facture</th>
               <th>Quantité</th>
               <th>Prix unitaire</th>
               <th>Action</th>
@@ -4293,6 +4435,116 @@ function invalidateArticleIndex() {
   if (typeof _invoiceStatsCache !== 'undefined') _invoiceStatsCache.clear();
 }
 
+// ============================================================
+// ÉQUIVALENCES INTER-FOURNISSEURS
+// Permet d'identifier les mêmes articles vendus par différents fournisseurs
+// pour comparer les prix.
+// ============================================================
+
+// Mots-clés trop génériques à ignorer dans le matching
+const EQUIV_STOPWORDS = new Set([
+  'pour', 'avec', 'sans', 'dans', 'sous', 'sur', 'par', 'des', 'les', 'une',
+  'ref', 'cf', 'std', 'nf', 'p', 'u', 'm', 'cm', 'mm', 'kg', 'eur', 'ht',
+  'pcs', 'pce', 'piece', 'unite', 'ens', 'lot', 'jeu', 'kit',
+]);
+
+function tokenizeForEquiv(text) {
+  if (!text) return [];
+  const norm = normalize(text);
+  return norm.split(/\s+/)
+    .filter(t => t.length >= 3 && !EQUIV_STOPWORDS.has(t) && !/^[\d\.\,]+$/.test(t));
+}
+
+// Calcule un score de similarité entre 2 désignations (0 à 1)
+function similarityScore(designA, designB) {
+  const tokensA = new Set(tokenizeForEquiv(designA));
+  const tokensB = new Set(tokenizeForEquiv(designB));
+  if (tokensA.size === 0 || tokensB.size === 0) return 0;
+  let common = 0;
+  tokensA.forEach(t => { if (tokensB.has(t)) common++; });
+  // Jaccard : intersection / union
+  const union = tokensA.size + tokensB.size - common;
+  return common / union;
+}
+
+// Trouve les équivalents potentiels d'un article (chez d'autres fournisseurs)
+// Retourne la liste triée par score décroissant
+function findEquivalentSuggestions(articleId, threshold = 0.45, maxResults = 10) {
+  const article = STATE.articles[articleId];
+  if (!article || !article.designation) return [];
+
+  const supplier = normalize(article.supplier || '');
+  const tokensRef = tokenizeForEquiv(article.designation);
+  if (tokensRef.length < 2) return [];
+
+  const results = [];
+  for (const [otherId, other] of Object.entries(STATE.articles)) {
+    if (otherId === articleId) continue;
+    if (!other || !other.designation) continue;
+    // Skip même fournisseur
+    if (other.supplier && normalize(other.supplier) === supplier) continue;
+    // Skip si déjà lié
+    if (article.equivalents && article.equivalents.includes(otherId)) continue;
+
+    const score = similarityScore(article.designation, other.designation);
+    if (score >= threshold) {
+      results.push({ id: otherId, article: other, score });
+    }
+  }
+
+  results.sort((a, b) => b.score - a.score);
+  return results.slice(0, maxResults);
+}
+
+// Récupère TOUS les équivalents (déjà liés) d'un article, en incluant l'article lui-même
+// Utile pour comparer les prix. Retourne [{id, article, isCurrent}]
+function getEquivalentArticles(articleId) {
+  const article = STATE.articles[articleId];
+  if (!article) return [];
+
+  const allIds = new Set([articleId]);
+  // Ajouter ceux déclarés par cet article
+  (article.equivalents || []).forEach(id => allIds.add(id));
+  // Ajouter ceux qui déclarent cet article comme équivalent (lien bi-directionnel)
+  for (const [otherId, other] of Object.entries(STATE.articles)) {
+    if (other && other.equivalents && other.equivalents.includes(articleId)) {
+      allIds.add(otherId);
+    }
+  }
+
+  return [...allIds]
+    .map(id => ({ id, article: STATE.articles[id], isCurrent: id === articleId }))
+    .filter(x => x.article);
+}
+
+// Vérifie si l'article est plus cher que ses équivalents — pour alerte "tu paies trop cher"
+// Retourne null si pas d'équivalents OU si c'est le moins cher,
+// sinon { cheapestId, cheapestPrice, currentPrice, savings }
+function checkCheaperEquivalent(articleId) {
+  const equivs = getEquivalentArticles(articleId);
+  if (equivs.length < 2) return null;
+  const current = equivs.find(x => x.isCurrent);
+  if (!current || !current.article.price) return null;
+  const currentPrice = parseFloat(current.article.price);
+
+  let cheapest = current;
+  for (const e of equivs) {
+    if (e.article.price && parseFloat(e.article.price) < parseFloat(cheapest.article.price)) {
+      cheapest = e;
+    }
+  }
+  if (cheapest.id === articleId) return null;  // c'est le moins cher
+  const cheapestPrice = parseFloat(cheapest.article.price);
+  return {
+    cheapestId: cheapest.id,
+    cheapestArticle: cheapest.article,
+    cheapestPrice,
+    currentPrice,
+    savings: currentPrice - cheapestPrice,
+    savingsPct: ((currentPrice - cheapestPrice) / currentPrice) * 100,
+  };
+}
+
 function findArticleMatch(line, supplierName) {
   const idx = getArticleIndex();
   const supKey = supplierName ? normalize(supplierName) : null;
@@ -5137,6 +5389,9 @@ function renderTabs() {
 }
 
 // ----- ARTICLES -----
+// État global de tri pour la base articles
+let _articlesSort = { field: 'code', direction: 'asc' };
+
 function renderArticles() {
   const tbody = $('#articlesBody');
   const search = normalize($('#searchArticles').value);
@@ -5169,7 +5424,20 @@ function renderArticles() {
 
   // Limite d'affichage pour éviter de bloquer le navigateur avec 35k+ articles
   const MAX_DISPLAY = 200;
-  const sorted = filtered.sort((a, b) => (a.code || '').localeCompare(b.code || ''));
+  const f = _articlesSort.field;
+  const dir = _articlesSort.direction === 'desc' ? -1 : 1;
+  const sorted = filtered.sort((a, b) => {
+    let va = a[f], vb = b[f];
+    // Numérique pour price/updatedAt
+    if (f === 'price' || f === 'updatedAt') {
+      va = parseFloat(va) || 0; vb = parseFloat(vb) || 0;
+      return (va - vb) * dir;
+    }
+    // Texte
+    va = (va || '').toString().toLowerCase();
+    vb = (vb || '').toString().toLowerCase();
+    return va.localeCompare(vb) * dir;
+  });
   const displayed = sorted.slice(0, MAX_DISPLAY);
   const truncated = filtered.length > MAX_DISPLAY;
 
@@ -5177,10 +5445,15 @@ function renderArticles() {
     .map(a => {
       const isTooling = (a.category || '').toLowerCase().trim() === 'outillage generaliste';
       const rowClass = isTooling ? 'row-tooling' : '';
+      // Alerte "tu paies trop cher" si équivalent moins cher
+      const cheaper = checkCheaperEquivalent(a.id);
+      const cheaperBadge = cheaper
+        ? `<span class="badge badge-warn" title="${escapeAttr(cheaper.cheapestArticle.supplier || '')} le vend ${fmtMoney(cheaper.cheapestPrice)}">💰 -${fmtMoney(cheaper.savings)}</span>`
+        : '';
       return `
       <tr class="${rowClass}" data-id="${a.id}">
         <td><strong>${escapeHtml(a.code || '—')}</strong>${a.supplierCode ? `<br><span class="muted small">${escapeHtml(a.supplierCode)}</span>` : ''}</td>
-        <td>${escapeHtml(a.designation || '—')}</td>
+        <td>${escapeHtml(a.designation || '—')} ${cheaperBadge}</td>
         <td>${escapeHtml(a.supplier || '—')}</td>
         <td><span class="badge badge-muted">${escapeHtml(a.category || '—')}</span></td>
         <td>${escapeHtml(a.unit || 'U')}</td>
@@ -5191,6 +5464,7 @@ function renderArticles() {
           <div style="display:flex;gap:4px">
             <button class="btn-mini" data-edit="${a.id}">Modifier</button>
             <button class="btn-mini" data-history="${a.id}" title="Historique des achats">📊</button>
+            <button class="btn-mini" data-equiv="${a.id}" title="Équivalents inter-fournisseurs">🔗</button>
           </div>
         </td>
       </tr>
@@ -5207,6 +5481,279 @@ function renderArticles() {
     btn.addEventListener('click', () => openArticleModal(btn.dataset.edit)));
   tbody.querySelectorAll('[data-history]').forEach(btn =>
     btn.addEventListener('click', () => openArticleHistoryModal(btn.dataset.history)));
+  tbody.querySelectorAll('[data-equiv]').forEach(btn =>
+    btn.addEventListener('click', () => openArticleEquivModal(btn.dataset.equiv)));
+
+  // Mettre à jour les flèches de tri dans les en-têtes
+  const table = document.querySelector('#tab-articles .sortable-table');
+  if (table) {
+    table.querySelectorAll('th.sortable').forEach(th => {
+      const arrow = th.querySelector('.sort-arrow');
+      if (!arrow) return;
+      if (th.dataset.sort === _articlesSort.field) {
+        arrow.textContent = _articlesSort.direction === 'asc' ? '▲' : '▼';
+        th.classList.add('sorted');
+      } else {
+        arrow.textContent = '⇅';
+        th.classList.remove('sorted');
+      }
+    });
+  }
+}
+
+// ============================================================
+// VUE "ARTICLES ACHETÉS" : agrégation des lignes de factures
+// ============================================================
+let _purchasesSort = { field: 'totalAmount', direction: 'desc' };
+
+function getAllPurchaseLines() {
+  // Aplati toutes les lignes de factures avec leur contexte
+  const lines = [];
+  for (const invId in STATE.invoices) {
+    const inv = STATE.invoices[invId];
+    if (!inv || !inv.lines) continue;
+    inv.lines.forEach((line, idx) => {
+      if (!line.code && !line.designation) return;  // skip lignes vides
+      const qty = parseFloat(line.qty) || 1;
+      const pu = parseFloat(line.pu) || 0;
+      lines.push({
+        invId, lineIdx: idx,
+        code: line.code || '',
+        designation: line.designation || '',
+        supplier: inv.supplier || '',
+        qty, unit: line.unit || 'U',
+        pu,
+        total: qty * pu,
+        date: inv.date,
+        invoiceNumber: inv.number,
+      });
+    });
+  }
+  return lines;
+}
+
+function renderPurchases() {
+  const tbody = $('#purchasesBody');
+  if (!tbody) return;
+
+  const search = normalize($('#searchPurchases') ? $('#searchPurchases').value : '');
+  const filterSup = $('#filterPurchaseSupplier') ? $('#filterPurchaseSupplier').value : '';
+  const grouping = $('#filterPurchaseGrouping') ? $('#filterPurchaseGrouping').value : 'grouped';
+
+  // Récupérer toutes les lignes
+  let allLines = getAllPurchaseLines();
+
+  // Filtrer
+  allLines = allLines.filter(l => {
+    if (filterSup && l.supplier !== filterSup) return false;
+    if (search) {
+      const hay = normalize([l.code, l.designation, l.supplier, l.invoiceNumber].join(' '));
+      if (!hay.includes(search)) return false;
+    }
+    return true;
+  });
+
+  // Mettre à jour les KPI
+  const totalAmount = allLines.reduce((s, l) => s + l.total, 0);
+  const uniqueRefs = new Set(allLines.map(l => `${l.code}|${normalize(l.designation)}|${l.supplier}`));
+  if ($('#kpiPurchaseLines')) $('#kpiPurchaseLines').textContent = allLines.length.toLocaleString('fr-FR');
+  if ($('#kpiPurchaseUnique')) $('#kpiPurchaseUnique').textContent = uniqueRefs.size.toLocaleString('fr-FR');
+  if ($('#kpiPurchaseAmount')) $('#kpiPurchaseAmount').textContent = fmtMoney(totalAmount);
+
+  // Mode "all" : afficher chaque ligne individuellement (pas d'agrégation)
+  let rows;
+  if (grouping === 'all') {
+    rows = allLines.map(l => ({
+      key: `${l.invId}|${l.lineIdx}`,
+      code: l.code,
+      designation: l.designation,
+      supplier: l.supplier,
+      count: 1,
+      qty: l.qty,
+      unit: l.unit,
+      avgPrice: l.pu,
+      totalAmount: l.total,
+      lastDate: l.date,
+      lines: [l],
+    }));
+  } else {
+    // Mode "grouped" : agréger par code+désignation+fournisseur
+    const groups = new Map();
+    for (const l of allLines) {
+      const key = `${l.code.toLowerCase()}|${normalize(l.designation)}|${normalize(l.supplier)}`;
+      let g = groups.get(key);
+      if (!g) {
+        g = {
+          key,
+          code: l.code,
+          designation: l.designation,
+          supplier: l.supplier,
+          unit: l.unit,
+          count: 0,
+          qty: 0,
+          totalAmount: 0,
+          lastDate: l.date,
+          lines: [],
+        };
+        groups.set(key, g);
+      }
+      g.count++;
+      g.qty += l.qty;
+      g.totalAmount += l.total;
+      g.lines.push(l);
+      if (l.date && (!g.lastDate || l.date > g.lastDate)) g.lastDate = l.date;
+    }
+    rows = [...groups.values()].map(g => ({
+      ...g,
+      avgPrice: g.qty > 0 ? g.totalAmount / g.qty : 0,
+    }));
+  }
+
+  // Tri
+  const f = _purchasesSort.field;
+  const dir = _purchasesSort.direction === 'desc' ? -1 : 1;
+  rows.sort((a, b) => {
+    let va = a[f], vb = b[f];
+    if (typeof va === 'number' || typeof vb === 'number') {
+      return ((va || 0) - (vb || 0)) * dir;
+    }
+    va = (va || '').toString().toLowerCase();
+    vb = (vb || '').toString().toLowerCase();
+    return va.localeCompare(vb) * dir;
+  });
+
+  if ($('#purchasesCount')) $('#purchasesCount').textContent = `${rows.length.toLocaleString('fr-FR')} ligne${rows.length > 1 ? 's' : ''}`;
+
+  if (rows.length === 0) {
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="9">Aucun article ne correspond aux filtres.</td></tr>`;
+    return;
+  }
+
+  // Pagination max 200
+  const MAX_DISPLAY = 200;
+  const displayed = rows.slice(0, MAX_DISPLAY);
+  const truncated = rows.length > MAX_DISPLAY;
+
+  let html = displayed.map(r => `
+    <tr data-key="${escapeAttr(r.key)}">
+      <td><strong>${escapeHtml(r.code || '—')}</strong></td>
+      <td>${escapeHtml(r.designation || '—')}</td>
+      <td>${escapeHtml(r.supplier || '—')}</td>
+      <td class="numeric">${r.count}</td>
+      <td class="numeric">${fmt(r.qty)} ${escapeHtml(r.unit || '')}</td>
+      <td class="numeric">${fmtMoney(r.avgPrice)}</td>
+      <td class="numeric"><strong>${fmtMoney(r.totalAmount)}</strong></td>
+      <td>${fmtDate(r.lastDate)}</td>
+      <td><button class="btn-mini" data-purchase-detail="${escapeAttr(r.key)}">Détail</button></td>
+    </tr>
+  `).join('');
+
+  if (truncated) {
+    html += `<tr class="empty-row"><td colspan="9" style="text-align:center;padding:16px"><span class="muted">📋 ${MAX_DISPLAY} lignes affichées sur ${rows.length.toLocaleString('fr-FR')}. <strong>Filtrez</strong> pour voir les autres.</span></td></tr>`;
+  }
+
+  tbody.innerHTML = html;
+
+  // Action Détail : ouvrir une vue avec toutes les lignes du groupe
+  // On stocke les rows pour pouvoir y accéder depuis le handler
+  _lastPurchaseRows = rows;
+  tbody.querySelectorAll('[data-purchase-detail]').forEach(btn =>
+    btn.addEventListener('click', () => openPurchaseDetailModal(btn.dataset.purchaseDetail)));
+
+  // Mettre à jour les flèches de tri
+  const table = document.querySelector('#tab-purchases .sortable-table');
+  if (table) {
+    table.querySelectorAll('th[data-sort-purchase]').forEach(th => {
+      const arrow = th.querySelector('.sort-arrow');
+      if (!arrow) return;
+      if (th.dataset.sortPurchase === _purchasesSort.field) {
+        arrow.textContent = _purchasesSort.direction === 'asc' ? '▲' : '▼';
+        th.classList.add('sorted');
+      } else {
+        arrow.textContent = '⇅';
+        th.classList.remove('sorted');
+      }
+    });
+  }
+
+  // Remplir le dropdown fournisseur (1 fois)
+  const supSel = $('#filterPurchaseSupplier');
+  if (supSel && supSel.options.length <= 1) {
+    const supps = new Set();
+    Object.values(STATE.invoices).forEach(inv => { if (inv.supplier) supps.add(inv.supplier); });
+    [...supps].sort().forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s; opt.textContent = s;
+      supSel.appendChild(opt);
+    });
+  }
+}
+
+let _lastPurchaseRows = [];
+
+function openPurchaseDetailModal(key) {
+  const row = _lastPurchaseRows.find(r => r.key === key);
+  if (!row) return;
+  // Réutiliser la modale historique avec un mode "ad hoc"
+  $('#historyTitle').textContent = row.designation || row.code || 'Article';
+  $('#historySubtitle').innerHTML = `
+    <strong>${escapeHtml(row.code || '')}</strong> · ${escapeHtml(row.supplier || '—')} · ${row.count} achat${row.count > 1 ? 's' : ''}
+  `;
+
+  const prices = row.lines.map(l => l.pu).filter(p => p > 0);
+  if (prices.length > 0) {
+    $('#historyStats').innerHTML = `
+      <div class="hist-stat"><span class="hist-stat-label">Achats</span><span class="hist-stat-value">${row.count}</span></div>
+      <div class="hist-stat"><span class="hist-stat-label">Qté totale</span><span class="hist-stat-value">${fmt(row.qty)}</span></div>
+      <div class="hist-stat"><span class="hist-stat-label">Prix min</span><span class="hist-stat-value text-ok">${fmtMoney(Math.min(...prices))}</span></div>
+      <div class="hist-stat"><span class="hist-stat-label">Prix moyen</span><span class="hist-stat-value">${fmtMoney(row.avgPrice)}</span></div>
+      <div class="hist-stat"><span class="hist-stat-label">Prix max</span><span class="hist-stat-value text-danger">${fmtMoney(Math.max(...prices))}</span></div>
+      <div class="hist-stat"><span class="hist-stat-label">Total dépensé</span><span class="hist-stat-value">${fmtMoney(row.totalAmount)}</span></div>
+    `;
+  }
+
+  // Trier par date desc
+  const sortedLines = [...row.lines].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  $('#historyTbody').innerHTML = sortedLines.map(l => `
+    <tr>
+      <td>${fmtDate(l.date)}</td>
+      <td><strong>${escapeHtml(l.invoiceNumber || '—')}</strong></td>
+      <td>${l.code ? `<strong>${escapeHtml(l.code)}</strong> · ` : ''}${escapeHtml(l.designation || '—')}</td>
+      <td class="numeric">${fmt(l.qty)} ${escapeHtml(l.unit || '')}</td>
+      <td class="numeric"><strong>${fmtMoney(l.pu)}</strong></td>
+      <td><button class="btn-mini" data-hist-view="${l.invId}">Voir facture</button></td>
+    </tr>
+  `).join('');
+
+  $('#historyTbody').querySelectorAll('[data-hist-view]').forEach(b =>
+    b.addEventListener('click', () => {
+      $('#articleHistoryModal').hidden = true;
+      openInvoiceModal(b.dataset.histView);
+    }));
+
+  $('#articleHistoryModal').hidden = false;
+}
+
+// Export Excel des achats
+function exportPurchasesXlsx() {
+  const lines = getAllPurchaseLines();
+  if (lines.length === 0) { toast('Aucun achat à exporter', 'info'); return; }
+  const wb = XLSX.utils.book_new();
+  const data = lines.map(l => ({
+    Date: l.date,
+    'N° Facture': l.invoiceNumber,
+    Fournisseur: l.supplier,
+    Code: l.code,
+    Désignation: l.designation,
+    Quantité: l.qty,
+    Unité: l.unit,
+    'Prix unitaire HT': l.pu,
+    'Montant HT': l.total,
+  }));
+  const ws = XLSX.utils.json_to_sheet(data);
+  XLSX.utils.book_append_sheet(wb, ws, 'Articles achetés');
+  XLSX.writeFile(wb, `articles-achetes-${today()}.xlsx`);
+  toast(`${lines.length} lignes exportées`, 'ok');
 }
 
 // ----- FOURNISSEURS -----
@@ -6202,8 +6749,133 @@ let _searchLineIdx = -1;
 let _searchInvId = null;       // si mode 'saved' : id de la facture déjà enregistrée
 let _searchMode = 'current';   // 'current' = facture en cours d'extraction, 'saved' = facture déjà sauvée
 // ============================================================
-// MODAL HISTORIQUE D'ACHATS pour un article donné
+// MODAL ÉQUIVALENCES INTER-FOURNISSEURS
 // ============================================================
+let _currentEquivArticleId = null;
+
+function openArticleEquivModal(articleId) {
+  _currentEquivArticleId = articleId;
+  const article = STATE.articles[articleId];
+  if (!article) return;
+
+  $('#equivTitle').textContent = article.designation || article.code || 'Article';
+  $('#equivSubtitle').innerHTML = `
+    <strong>${escapeHtml(article.code || '')}</strong> · ${escapeHtml(article.supplier || '—')} · Prix : <strong>${fmtMoney(article.price)}</strong>
+  `;
+
+  refreshEquivLists(articleId);
+  $('#articleEquivModal').hidden = false;
+}
+
+function refreshEquivLists(articleId) {
+  const article = STATE.articles[articleId];
+  if (!article) return;
+
+  // 1. Liste des articles DÉJÀ liés
+  const linked = getEquivalentArticles(articleId).filter(x => !x.isCurrent);
+  if (linked.length === 0) {
+    $('#equivLinkedList').innerHTML = `<div class="muted small" style="padding:8px;background:var(--bg-3);border-radius:var(--radius-sm)">Aucun article lié pour l'instant.</div>`;
+  } else {
+    // Trouver le moins cher pour mettre une étoile
+    const allPrices = [parseFloat(article.price) || 0, ...linked.map(x => parseFloat(x.article.price) || 0)];
+    const minPrice = Math.min(...allPrices.filter(p => p > 0));
+    $('#equivLinkedList').innerHTML = linked.map(x => {
+      const price = parseFloat(x.article.price) || 0;
+      const isCheapest = price > 0 && price === minPrice;
+      const badge = isCheapest ? '<span class="badge badge-ok">⭐ Moins cher</span>' : '';
+      return `
+        <div class="equiv-item">
+          <div class="equiv-info">
+            <strong>${escapeHtml(x.article.designation || '—')}</strong> ${badge}
+            <div class="muted small">${escapeHtml(x.article.code || '')} · ${escapeHtml(x.article.supplier || '—')}</div>
+          </div>
+          <div class="equiv-price">${fmtMoney(price)}</div>
+          <button class="btn-mini" data-unlink="${x.id}" title="Retirer le lien">✕</button>
+        </div>`;
+    }).join('');
+
+    $('#equivLinkedList').querySelectorAll('[data-unlink]').forEach(btn =>
+      btn.addEventListener('click', () => unlinkEquivalent(articleId, btn.dataset.unlink)));
+  }
+
+  // 2. Suggestions
+  const suggestions = findEquivalentSuggestions(articleId, 0.45, 15);
+  if (suggestions.length === 0) {
+    $('#equivSuggestionsList').innerHTML = `<div class="muted small" style="padding:8px;background:var(--bg-3);border-radius:var(--radius-sm)">Aucune suggestion trouvée. Liez manuellement via la recherche.</div>`;
+  } else {
+    $('#equivSuggestionsList').innerHTML = suggestions.map(s => {
+      const scorePct = Math.round(s.score * 100);
+      return `
+        <div class="equiv-item equiv-suggestion">
+          <div class="equiv-info">
+            <strong>${escapeHtml(s.article.designation || '—')}</strong>
+            <div class="muted small">${escapeHtml(s.article.code || '')} · ${escapeHtml(s.article.supplier || '—')} · <span style="color:var(--accent)">match ${scorePct}%</span></div>
+          </div>
+          <div class="equiv-price">${fmtMoney(s.article.price)}</div>
+          <button class="btn-mini btn-primary" data-link="${s.id}">✓ Lier</button>
+          <button class="btn-mini" data-skip="${s.id}" title="Ignorer">×</button>
+        </div>`;
+    }).join('');
+
+    $('#equivSuggestionsList').querySelectorAll('[data-link]').forEach(btn =>
+      btn.addEventListener('click', () => linkEquivalent(articleId, btn.dataset.link)));
+    $('#equivSuggestionsList').querySelectorAll('[data-skip]').forEach(btn =>
+      btn.addEventListener('click', () => {
+        // Skip = ignorer (juste cacher cette suggestion en l'ajoutant à equivIgnored de l'article)
+        const a = STATE.articles[articleId];
+        a.equivIgnored = a.equivIgnored || [];
+        if (!a.equivIgnored.includes(btn.dataset.skip)) {
+          a.equivIgnored.push(btn.dataset.skip);
+        }
+        fbWrite('articles/' + articleId, a);
+        refreshEquivLists(articleId);
+      }));
+  }
+}
+
+async function linkEquivalent(articleId, otherId) {
+  const a = STATE.articles[articleId];
+  if (!a) return;
+  a.equivalents = a.equivalents || [];
+  if (!a.equivalents.includes(otherId)) {
+    a.equivalents.push(otherId);
+    a.updatedAt = Date.now();
+    await fbWrite('articles/' + articleId, a);
+    invalidateArticleIndex();
+    toast('Article lié comme équivalent', 'ok');
+    refreshEquivLists(articleId);
+  }
+}
+
+async function unlinkEquivalent(articleId, otherId) {
+  const a = STATE.articles[articleId];
+  if (!a || !a.equivalents) return;
+  a.equivalents = a.equivalents.filter(id => id !== otherId);
+  a.updatedAt = Date.now();
+  await fbWrite('articles/' + articleId, a);
+  // Aussi retirer l'inverse si bi-directionnel
+  const b = STATE.articles[otherId];
+  if (b && b.equivalents && b.equivalents.includes(articleId)) {
+    b.equivalents = b.equivalents.filter(id => id !== articleId);
+    b.updatedAt = Date.now();
+    await fbWrite('articles/' + otherId, b);
+  }
+  invalidateArticleIndex();
+  toast('Lien retiré', 'info');
+  refreshEquivLists(articleId);
+}
+
+// Modifier findEquivalentSuggestions pour ignorer les "skipped"
+const _findEquivalentSuggestionsBase = findEquivalentSuggestions;
+findEquivalentSuggestions = function(articleId, threshold, maxResults) {
+  const article = STATE.articles[articleId];
+  const ignored = new Set(article && article.equivIgnored ? article.equivIgnored : []);
+  return _findEquivalentSuggestionsBase(articleId, threshold, maxResults * 2)
+    .filter(s => !ignored.has(s.id))
+    .slice(0, maxResults);
+};
+
+
 function openArticleHistoryModal(articleId) {
   const article = STATE.articles[articleId];
   if (!article) return;
@@ -6239,6 +6911,8 @@ function openArticleHistoryModal(articleId) {
           date: inv.date,
           number: inv.number,
           supplier: inv.supplier,
+          lineCode: line.code,            // code tel que saisi sur la facture
+          lineDesignation: line.designation, // désignation telle que saisie
           qty: line.qty,
           unit: line.unit,
           pu: parseFloat(line.pu) || 0,
@@ -6289,7 +6963,7 @@ function openArticleHistoryModal(articleId) {
 
   // Tableau historique
   if (purchases.length === 0) {
-    $('#historyTbody').innerHTML = `<tr><td colspan="5" class="muted" style="text-align:center;padding:20px">Cet article n'a encore jamais été facturé.</td></tr>`;
+    $('#historyTbody').innerHTML = `<tr><td colspan="6" class="muted" style="text-align:center;padding:20px">Cet article n'a encore jamais été facturé.</td></tr>`;
   } else {
     $('#historyTbody').innerHTML = purchases.map(p => {
       // Comparaison au tarif
@@ -6303,10 +6977,22 @@ function openArticleHistoryModal(articleId) {
         else if (pct <= -tw) badge = `<span class="badge badge-ok">${fmtPct(pct)}</span>`;
         else badge = `<span class="badge badge-ok">${fmtPct(pct)}</span>`;
       }
+      // Détecter un possible mauvais rattachement : désignation très différente
+      let mismatchWarn = '';
+      if (p.lineDesignation && article.designation) {
+        const score = similarityScore(p.lineDesignation, article.designation);
+        if (score < 0.4) {
+          mismatchWarn = `<span class="badge badge-warn" title="La désignation diffère beaucoup de l'article tarifé — vérifie le rattachement" style="margin-left:4px">⚠️</span>`;
+        }
+      }
       return `
         <tr>
           <td>${fmtDate(p.date)}</td>
           <td><strong>${escapeHtml(p.number || '—')}</strong></td>
+          <td>
+            ${p.lineCode ? `<strong>${escapeHtml(p.lineCode)}</strong> · ` : ''}${escapeHtml(p.lineDesignation || '—')}
+            ${mismatchWarn}
+          </td>
           <td class="numeric">${fmt(p.qty)} ${escapeHtml(p.unit || '')}</td>
           <td class="numeric"><strong>${fmtMoney(p.pu)}</strong> ${badge}</td>
           <td><button class="btn-mini" data-hist-view="${p.invId}">Voir facture</button></td>
@@ -6855,6 +7541,7 @@ function renderAll() {
 
   switch (tabId) {
     case 'tab-articles': renderArticles(); break;
+    case 'tab-purchases': renderPurchases(); break;
     case 'tab-suppliers': renderSuppliers(); break;
     case 'tab-ecarts': renderEcarts(); break;
     case 'tab-history': renderInvoices(); break;
@@ -6867,6 +7554,7 @@ function renderAll() {
   // Re-rendre les autres onglets en arrière-plan, sans bloquer l'UI
   setTimeout(() => {
     if (tabId !== 'tab-articles') renderArticles();
+    if (tabId !== 'tab-purchases' && document.querySelector('#tab-purchases')) renderPurchases();
     if (tabId !== 'tab-suppliers') renderSuppliers();
     if (tabId !== 'tab-history') renderInvoices();
     if (tabId !== 'tab-ecarts') renderEcarts();
@@ -6934,6 +7622,48 @@ function bindEvents() {
   if ($('#filterTooling')) {
     $('#filterTooling').addEventListener('change', renderArticles);
   }
+  // Tri sur en-têtes des articles
+  const articleSortable = document.querySelectorAll('#tab-articles .sortable-table th.sortable');
+  articleSortable.forEach(th => {
+    th.addEventListener('click', () => {
+      const f = th.dataset.sort;
+      if (_articlesSort.field === f) {
+        _articlesSort.direction = _articlesSort.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        _articlesSort.field = f;
+        _articlesSort.direction = 'asc';
+      }
+      renderArticles();
+    });
+  });
+
+  // ----- Articles achetés -----
+  if ($('#searchPurchases')) {
+    $('#searchPurchases').addEventListener('input', debounce(renderPurchases, 200));
+  }
+  if ($('#filterPurchaseSupplier')) {
+    $('#filterPurchaseSupplier').addEventListener('change', renderPurchases);
+  }
+  if ($('#filterPurchaseGrouping')) {
+    $('#filterPurchaseGrouping').addEventListener('change', renderPurchases);
+  }
+  if ($('#btnExportPurchases')) {
+    $('#btnExportPurchases').addEventListener('click', exportPurchasesXlsx);
+  }
+  // Tri sur en-têtes
+  const purchasesSortable = document.querySelectorAll('#tab-purchases th[data-sort-purchase]');
+  purchasesSortable.forEach(th => {
+    th.addEventListener('click', () => {
+      const f = th.dataset.sortPurchase;
+      if (_purchasesSort.field === f) {
+        _purchasesSort.direction = _purchasesSort.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        _purchasesSort.field = f;
+        _purchasesSort.direction = f === 'designation' || f === 'code' || f === 'supplier' ? 'asc' : 'desc';
+      }
+      renderPurchases();
+    });
+  });
   $('#btnImportArticles').addEventListener('click', () => {
     const inp = document.createElement('input');
     inp.type = 'file'; inp.accept = '.xlsx,.xls,.csv';
